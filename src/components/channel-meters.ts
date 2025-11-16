@@ -21,7 +21,7 @@ export class ChannelMetersComponent implements VisualComponent {
   readonly id: string = 'channel-meters';
 
   private device: GPUDevice | null = null;
-  private ctx: VisualContext | null = null;
+  private _ctx: VisualContext | null = null;
   private resources: MeterGPUResources | null = null;
   private dimensions: Dimensions = {
     width: 100,
@@ -31,12 +31,12 @@ export class ChannelMetersComponent implements VisualComponent {
     physicalHeight: 300,
   };
 
-  private channelCount: number = 2;
+  private channelCount = 2;
   private peakHoldValues: number[] = [];
   private peakHoldTimers: number[] = [];
-  private peakHoldDuration: number = 2.0; // seconds
+  private peakHoldDuration = 2.0; // seconds
 
-  constructor(channelCount: number = 2) {
+  constructor(channelCount = 2) {
     this.channelCount = channelCount;
     this.peakHoldValues = new Array(channelCount).fill(0);
     this.peakHoldTimers = new Array(channelCount).fill(0);
@@ -44,7 +44,7 @@ export class ChannelMetersComponent implements VisualComponent {
 
   async initialize(device: GPUDevice, ctx: VisualContext): Promise<void> {
     this.device = device;
-    this.ctx = ctx;
+    this._ctx = ctx;
 
     const shaderModule = device.createShaderModule({
       label: 'Meters Shader',
@@ -123,7 +123,7 @@ export class ChannelMetersComponent implements VisualComponent {
   }
 
   update(dt: number, time: number, audio: AudioVisualState): void {
-    if (!this.device || !this.resources) return;
+    if (!this.device || !this.resources) {return;}
 
     // Update uniform buffer
     const uniformData = new Float32Array([
@@ -180,7 +180,7 @@ export class ChannelMetersComponent implements VisualComponent {
   }
 
   encode(encoder: GPUCommandEncoder, view: GPUTextureView): void {
-    if (!this.resources) return;
+    if (!this.resources) {return;}
 
     const renderPass = encoder.beginRenderPass({
       label: 'Meters Render Pass',

@@ -3,8 +3,8 @@
  * Manages GPU device, context, and shared resources
  */
 
-import type { VisualContext, SharedUniforms, Dimensions } from '../types/visual-component.ts';
-import { VisualTheme, DEFAULT_THEME } from '../types/audio-state.ts';
+import type { VisualContext, Dimensions } from '../types/visual-component.ts';
+import { type VisualTheme, DEFAULT_THEME } from '../types/audio-state.ts';
 
 export interface GPURuntimeConfig {
   readonly canvas: HTMLCanvasElement;
@@ -35,7 +35,7 @@ export class GPURuntime {
 
   async initialize(): Promise<void> {
     // Request adapter
-    const adapter = await navigator.gpu?.requestAdapter();
+    const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) {
       throw new Error('WebGPU not supported: No adapter available');
     }
@@ -46,7 +46,7 @@ export class GPURuntime {
       requiredLimits: {},
     });
 
-    this.device.lost.then((info) => {
+    void this.device.lost.then((info) => {
       console.error('WebGPU device lost:', info.message);
     });
 
@@ -71,7 +71,7 @@ export class GPURuntime {
   }
 
   private createSharedResources(): void {
-    if (!this.device) throw new Error('Device not initialized');
+    if (!this.device) {throw new Error('Device not initialized');}
 
     // Shared uniform buffer (time, deltaTime, resolution)
     // Layout: vec4<f32> time_delta_res (time, dt, width, height)
@@ -129,7 +129,7 @@ export class GPURuntime {
   }
 
   updateSharedUniforms(time: number, deltaTime: number): void {
-    if (!this.device || !this.sharedUniformBuffer) return;
+    if (!this.device || !this.sharedUniformBuffer) {return;}
 
     const data = new Float32Array([
       time,
@@ -161,7 +161,7 @@ export class GPURuntime {
   }
 
   getDevice(): GPUDevice {
-    if (!this.device) throw new Error('Device not initialized');
+    if (!this.device) {throw new Error('Device not initialized');}
     return this.device;
   }
 

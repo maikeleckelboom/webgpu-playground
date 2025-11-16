@@ -10,7 +10,7 @@
 export interface WaveformBandConfig {
   readonly bandCount: number; // e.g., 3 (low/mid/high), 8, or 16
   readonly sampleRate: number;
-  readonly frequencyRanges: ReadonlyArray<{ min: number; max: number }>;
+  readonly frequencyRanges: readonly { min: number; max: number }[];
 }
 
 export interface WaveformLOD {
@@ -25,7 +25,7 @@ export interface WaveformLOD {
 export interface WaveformPyramid {
   readonly totalSamples: number;
   readonly sampleRate: number;
-  readonly lods: ReadonlyArray<WaveformLOD>;
+  readonly lods: readonly WaveformLOD[];
   readonly bands: WaveformBandConfig;
 }
 
@@ -69,8 +69,8 @@ export interface DeckState {
   readonly id: string;
   readonly transport: DeckTransportState;
   readonly loop: LoopState;
-  readonly cuePoints: ReadonlyArray<CuePoint>;
-  readonly sections: ReadonlyArray<SectionMarker>;
+  readonly cuePoints: readonly CuePoint[];
+  readonly sections: readonly SectionMarker[];
   readonly waveform: WaveformPyramid;
   readonly trackTitle: string;
   readonly trackArtist: string;
@@ -105,7 +105,7 @@ export interface MasterMeter extends ChannelMeter {
 export interface AudioVisualState {
   readonly time: number; // Current time in seconds (monotonic)
   readonly deltaTime: number; // Time since last frame
-  readonly decks: ReadonlyArray<DeckState>;
+  readonly decks: readonly DeckState[];
   readonly master: MasterMeter;
   readonly crossfaderPosition: number; // [-1, 1] where -1 is deck A, 1 is deck B
 }

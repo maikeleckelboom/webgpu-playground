@@ -21,10 +21,10 @@ class DJVisualizationApp {
   private deckState: DeckState;
   private audioState: AudioVisualState;
 
-  private isPlaying: boolean = false;
-  private loopActive: boolean = false;
-  private animationFrameId: number = 0;
-  private lastTime: number = 0;
+  private isPlaying = false;
+  private loopActive = false;
+  private animationFrameId = 0;
+  private lastTime = 0;
 
   private deckCanvas: HTMLCanvasElement;
   private metersCanvas: HTMLCanvasElement;
@@ -84,7 +84,7 @@ class DJVisualizationApp {
 
       // Handle resize
       this.handleResize();
-      window.addEventListener('resize', () => this.handleResize());
+      window.addEventListener('resize', () => { this.handleResize(); });
 
       // Start render loop
       this.lastTime = performance.now() / 1000;
@@ -205,7 +205,7 @@ class DJVisualizationApp {
   }
 
   private handleResize(): void {
-    if (!this.runtime || !this.waveformComponent) return;
+    if (!this.runtime || !this.waveformComponent) {return;}
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -273,12 +273,12 @@ class DJVisualizationApp {
     }
 
     // Schedule next frame
-    this.animationFrameId = requestAnimationFrame(() => this.render());
+    this.animationFrameId = requestAnimationFrame(() => { this.render(); });
   }
 
   private updateInfoDisplay(): void {
     const info = document.getElementById('info-a');
-    if (!info) return;
+    if (!info) {return;}
 
     const playheadSeconds = this.deckState.transport.playheadSamples / this.deckState.waveform.sampleRate;
     const totalSeconds = this.deckState.waveform.totalSamples / this.deckState.waveform.sampleRate;

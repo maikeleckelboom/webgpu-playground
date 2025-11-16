@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.wgsl
+*.html
+*.md
+*.json
+coverage/
+playwright-report/
+test-results/
