@@ -137,9 +137,12 @@ fn sampleAmplitude(lodCoord: f32) -> vec2<f32> {
   if (lodCoord < 0.0 || lodCoord > 1.0) {
     return vec2<f32>(0.0, 0.0);
   }
-  // Texture is 1D (height=1), so Y coordinate should be 0.5 (center of single row)
-  let texCoord = vec2<f32>(lodCoord, 0.5);
-  let sample = textureSample(amplitudeTex, texSampler, texCoord);
+  // Convert normalized coord to pixel index
+  let safeLodLength = max(waveform.lodLengthInPixels, 1.0);
+  let pixelIndex = i32(lodCoord * safeLodLength);
+  let clampedIndex = clamp(pixelIndex, 0, i32(safeLodLength) - 1);
+  // Use textureLoad for non-filtering access (no uniform control flow restriction)
+  let sample = textureLoad(amplitudeTex, vec2<i32>(clampedIndex, 0), 0);
   return vec2<f32>(sample.r, sample.g); // min, max
 }
 
@@ -148,9 +151,12 @@ fn sampleBands(lodCoord: f32) -> vec3<f32> {
   if (lodCoord < 0.0 || lodCoord > 1.0) {
     return vec3<f32>(0.33, 0.33, 0.34); // Return balanced bands for out-of-bounds
   }
-  // Texture is 1D (height=1), so Y coordinate should be 0.5 (center of single row)
-  let texCoord = vec2<f32>(lodCoord, 0.5);
-  let sample = textureSample(bandsTex, texSampler, texCoord);
+  // Convert normalized coord to pixel index
+  let safeLodLength = max(waveform.lodLengthInPixels, 1.0);
+  let pixelIndex = i32(lodCoord * safeLodLength);
+  let clampedIndex = clamp(pixelIndex, 0, i32(safeLodLength) - 1);
+  // Use textureLoad for non-filtering access (no uniform control flow restriction)
+  let sample = textureLoad(bandsTex, vec2<i32>(clampedIndex, 0), 0);
   return vec3<f32>(sample.r, sample.g, sample.b);
 }
 
