@@ -14,7 +14,7 @@ import type { AudioVisualState, DeckState, WaveformPyramid } from '../types/audi
 import waveformShaderCode from '../shaders/waveform.wgsl?raw';
 
 // GPU Buffer alignments
-const UNIFORM_ALIGNMENT = 16;
+const _UNIFORM_ALIGNMENT = 16;
 const WAVEFORM_UNIFORMS_SIZE = 128; // 32 floats * 4 bytes
 
 interface WaveformGPUResources {
@@ -42,7 +42,7 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
   };
 
   private deckIndex: number;
-  private zoom: number = 1.0; // Zoom factor (higher = more zoomed in)
+  private zoom = 1.0; // Zoom factor (higher = more zoomed in)
   private knobState: WaveformKnobState = {
     lowGain: 1.0,
     midGain: 1.0,
@@ -52,13 +52,13 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     saturation: 1.0,
   };
 
-  private showBeatGrid: boolean = true;
-  private showCuePoints: boolean = true;
-  private showLoopRegion: boolean = true;
+  private showBeatGrid = true;
+  private _showCuePoints = true;
+  private _showLoopRegion = true;
 
   private currentDeckState: DeckState | null = null;
-  private waveformUploaded: boolean = false;
-  private currentLODIndex: number = 0;
+  private waveformUploaded = false;
+  private currentLODIndex = 0;
 
   constructor(deckIndex: number) {
     this.id = `deck-waveform-${deckIndex}`;
@@ -184,12 +184,12 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     this.dimensions = dim;
   }
 
-  update(dt: number, time: number, audio: AudioVisualState): void {
-    if (!this.device || !this.resources || !this.ctx) return;
+  update(_dt: number, _time: number, audio: AudioVisualState): void {
+    if (!this.device || !this.resources || !this.ctx) {return;}
 
     // Get deck state
     const deckState = audio.decks[this.deckIndex];
-    if (!deckState) return;
+    if (!deckState) {return;}
 
     this.currentDeckState = deckState;
 
@@ -227,12 +227,12 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
 
   private getBaseSamplesPerPixel(): number {
     // Base case: show about 10 seconds of audio across the view
-    if (!this.currentDeckState) return 441;
+    if (!this.currentDeckState) {return 441;}
     return (this.currentDeckState.waveform.sampleRate * 10) / this.dimensions.physicalWidth;
   }
 
   private uploadWaveformData(pyramid: WaveformPyramid): void {
-    if (!this.device || !this.resources) return;
+    if (!this.device || !this.resources) {return;}
 
     // For simplicity, upload the middle LOD first
     // In production, you'd upload multiple LODs
@@ -254,7 +254,7 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     // Upload amplitude data
     this.device.queue.writeTexture(
       { texture: amplitudeTexture },
-      lod.amplitude,
+      lod.amplitude.buffer as ArrayBuffer,
       { bytesPerRow: lod.lengthInPixels * 8 }, // 2 floats * 4 bytes
       { width: lod.lengthInPixels, height: 1 }
     );
@@ -301,7 +301,7 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
   }
 
   private updateUniforms(deckState: DeckState): void {
-    if (!this.device || !this.resources) return;
+    if (!this.device || !this.resources) {return;}
 
     const lod = deckState.waveform.lods[this.currentLODIndex];
 
@@ -357,7 +357,7 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
   }
 
   encode(encoder: GPUCommandEncoder, view: GPUTextureView): void {
-    if (!this.resources || !this.ctx) return;
+    if (!this.resources || !this.ctx) {return;}
 
     const renderPass = encoder.beginRenderPass({
       label: 'Waveform Render Pass',
@@ -405,10 +405,10 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
   }
 
   setShowCuePoints(show: boolean): void {
-    this.showCuePoints = show;
+    this._showCuePoints = show;
   }
 
   setShowLoopRegion(show: boolean): void {
-    this.showLoopRegion = show;
+    this._showLoopRegion = show;
   }
 }
