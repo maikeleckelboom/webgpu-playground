@@ -220,6 +220,37 @@ interface TestHarnessState {
 }
 
 /**
+ * Validate that the waveform pyramid data is structurally correct.
+ * Throws descriptive errors if validation fails.
+ */
+function validateWaveformPyramid(pyramid: WaveformPyramid): void {
+  if (pyramid.lods.length === 0) {
+    throw new Error('WaveformPyramid must have at least one LOD');
+  }
+
+  for (let i = 0; i < pyramid.lods.length; i++) {
+    const lod = pyramid.lods[i];
+    if (!lod) {
+      throw new Error(`LOD at index ${i} is undefined`);
+    }
+
+    if (lod.amplitude.length !== lod.lengthInPixels) {
+      throw new Error(
+        `LOD ${i}: amplitude.length (${lod.amplitude.length}) !== lengthInPixels (${lod.lengthInPixels})`
+      );
+    }
+
+    const expectedBandLength = lod.lengthInPixels * pyramid.bandConfig.bandCount;
+    if (lod.bandEnergies.length !== expectedBandLength) {
+      throw new Error(
+        `LOD ${i}: bandEnergies.length (${lod.bandEnergies.length}) !== ` +
+        `lengthInPixels * bandCount (${expectedBandLength})`
+      );
+    }
+  }
+}
+
+/**
  * Initialize and run the test harness.
  */
 export function runTestHarness(
@@ -228,6 +259,9 @@ export function runTestHarness(
 ): TestHarnessState {
   // Create synthetic waveform data (4-minute track @ 128 BPM, 3 bands)
   const pyramid = createSyntheticWaveform(240, 44100, 128, 3);
+
+  // Validate waveform data structure before creating GPU resources
+  validateWaveformPyramid(pyramid);
 
   // Create the waveform component
   const waveform = createDeckWaveform({

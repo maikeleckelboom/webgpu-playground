@@ -20,6 +20,7 @@ struct WaveUniforms {
     waveformCenterY: f32,
     waveformMaxHeight: f32,
     time: f32,
+    bpm: f32,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: WaveUniforms;
@@ -174,9 +175,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Discrete Column Rendering (Serato-Style Thin Bars)
     // ==========================================================================
 
-    // Calculate the width of one waveform column in screen pixels
-    let pixelsPerColumn = uniforms.viewWidth / (uniforms.lodLengthInPixels * uniforms.zoomLevel * 0.1);
-
     // Get the fractional position within the current waveform column
     let columnFraction = fract(pixelIndexFloat);
 
@@ -301,6 +299,33 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let innerGlow = combinedColor * edgeGlow;
 
     // ==========================================================================
+    // Beat Grid Rendering (Serato-Style Visual Timing Cues)
+    // ==========================================================================
+
+    // Calculate beat position in samples
+    let samplesPerBeat = (60.0 / uniforms.bpm) * uniforms.sampleRate;
+    let beatIndex = samplePosition / samplesPerBeat;
+    let beatFraction = fract(beatIndex);
+
+    // Render subtle vertical lines at beat positions
+    let beatLineWidth = 0.3;
+    let distFromBeat = min(beatFraction, 1.0 - beatFraction);
+    let beatLineIntensity = smoothstep(beatLineWidth * 0.1, 0.0, distFromBeat);
+
+    // Bar lines (every 4 beats) are brighter
+    let barIndex = beatIndex / 4.0;
+    let barFraction = fract(barIndex);
+    let distFromBar = min(barFraction, 1.0 - barFraction);
+    let barLineIntensity = smoothstep(beatLineWidth * 0.15, 0.0, distFromBar);
+
+    // Combine beat and bar grid
+    let gridColor = vec3<f32>(0.2, 0.25, 0.35);
+    let beatGridStrength = beatLineIntensity * 0.15 + barLineIntensity * 0.25;
+
+    // Apply grid behind waveform (only visible in empty areas)
+    finalColor = mix(finalColor, gridColor, beatGridStrength * (1.0 - shapedEdge * 0.7));
+
+    // ==========================================================================
     // Playhead Rendering
     // ==========================================================================
 
@@ -332,6 +357,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let shadowDist = abs(uv.x - playheadX - shadowOffset);
     let shadowIntensity = smoothstep(playheadWidth * 1.5, 0.0, shadowDist) * 0.2;
     finalColor = mix(finalColor, vec3<f32>(0.0), shadowIntensity * (1.0 - playheadIntensity));
+
+    // Add subtle time-based "alive" indicator: playhead glow pulses gently
+    let playheadPulse = 0.85 + 0.15 * sin(uniforms.time * 2.0);
+    if (playheadIntensity > 0.1) {
+        finalColor = finalColor * playheadPulse;
+    }
+
+    // Subtle animated gradient at the very top edge to show shader is active
+    let topIndicator = smoothstep(0.01, 0.0, uv.y);
+    let indicatorColor = vec3<f32>(0.1, 0.15, 0.25) * (0.5 + 0.5 * sin(uniforms.time * 3.0 + uv.x * 10.0));
+    finalColor = mix(finalColor, indicatorColor, topIndicator * 0.3);
 
     return vec4<f32>(finalColor, 1.0);
 }

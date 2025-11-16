@@ -109,7 +109,8 @@ export interface WaveUniformsData {
   waveformCenterY: number;      // vertical center of waveform (0..1)
   waveformMaxHeight: number;    // max vertical extent (0..1)
   time: number;                 // current time in seconds
-  // Additional padding to reach 16-byte alignment (64 bytes total = 16 floats)
+  bpm: number;                  // beats per minute for beat grid
+  // One padding slot remaining to reach 16-byte alignment (64 bytes total = 16 floats)
 }
 
 /**

@@ -9,6 +9,7 @@ import type {
   DeckTransportState,
   LODGPUResources,
   WaveUniformsData,
+  WaveformPyramid,
 } from './types.ts';
 
 import {
@@ -52,11 +53,8 @@ interface DeckWaveformInternals {
   dpr: number;
 
   // Waveform pyramid reference
-  pyramid: typeof options.waveform;
+  pyramid: WaveformPyramid;
 }
-
-// Capture the options type for the pyramid
-let options: DeckWaveformOptions;
 
 // =============================================================================
 // Factory Function
@@ -67,7 +65,6 @@ let options: DeckWaveformOptions;
  * Configures the WebGPU context and all resources required for rendering.
  */
 export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
-  options = opts;
   const { device, canvas, waveform } = opts;
 
   // ==========================================================================
@@ -252,6 +249,7 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
       waveformCenterY: 0.5,     // Center of canvas vertically
       waveformMaxHeight: 0.4,   // Use 80% of canvas height total
       time,
+      bpm: internals.currentTransport.bpm,
     };
 
     writeUniforms(internals.device, internals.uniformBuffer, uniformData);
