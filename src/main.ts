@@ -13,6 +13,12 @@ import {
 } from './utils/test-data.ts';
 import type { DeckState, AudioVisualState } from './types/audio-state.ts';
 
+interface GPUInfo {
+  adapter: GPUAdapterInfo;
+  features: string[];
+  limits: Record<string, number>;
+}
+
 class DJVisualizationApp {
   private runtime: GPURuntime | null = null;
   private waveformComponent: DeckWaveformComponent | null = null;
@@ -28,6 +34,14 @@ class DJVisualizationApp {
 
   private deckCanvas: HTMLCanvasElement;
   private metersCanvas: HTMLCanvasElement;
+
+  // FPS tracking
+  private frameCount = 0;
+  private lastFPSUpdate = 0;
+  private currentFPS = 0;
+
+  // GPU Info
+  private gpuInfo: GPUInfo | null = null;
 
   constructor() {
     // Get canvas elements
@@ -47,30 +61,76 @@ class DJVisualizationApp {
       sampleRate: 44100,
       bpm: 128,
       key: 'Am',
-      title: 'Test Track',
-      artist: 'Test Artist',
+      title: 'Synthetic Wave',
+      artist: 'WebGPU Demo',
     });
 
     this.audioState = createTestAudioVisualState([this.deckState]);
+
+    // Update track info display
+    this.updateTrackInfo();
   }
 
   async initialize(): Promise<void> {
+    this.updateStatus('Checking WebGPU support...');
+
     // Check WebGPU support
     if (!navigator.gpu) {
-      this.showError('WebGPU is not supported in your browser. Please use Chrome 113+ or Edge 113+.');
+      this.showError(
+        'WebGPU is not supported in your browser.<br><br>' +
+        'Please use <a href="https://www.google.com/chrome/" target="_blank">Chrome 113+</a> or ' +
+        '<a href="https://www.microsoft.com/edge" target="_blank">Edge 113+</a> with WebGPU enabled.<br><br>' +
+        'You can check WebGPU support at <a href="https://webgpureport.org" target="_blank">webgpureport.org</a>'
+      );
       return;
     }
 
     try {
+      this.updateStatus('Requesting GPU adapter...');
+
+      // Request adapter first to get info
+      const adapter = await navigator.gpu.requestAdapter({
+        powerPreference: 'high-performance',
+      });
+
+      if (!adapter) {
+        throw new Error('No WebGPU adapter found. Your GPU may not support WebGPU.');
+      }
+
+      // Get adapter info (requestAdapterInfo may not be available in all versions)
+      let adapterInfo: GPUAdapterInfo;
+      if ('requestAdapterInfo' in adapter && typeof adapter.requestAdapterInfo === 'function') {
+        adapterInfo = await (adapter as GPUAdapter & { requestAdapterInfo: () => Promise<GPUAdapterInfo> }).requestAdapterInfo();
+      } else {
+        // Fallback for older WebGPU implementations
+        adapterInfo = {
+          vendor: '',
+          architecture: '',
+          device: '',
+          description: '',
+        } as unknown as GPUAdapterInfo;
+      }
+      this.gpuInfo = {
+        adapter: adapterInfo,
+        features: Array.from(adapter.features),
+        limits: this.extractLimits(adapter.limits),
+      };
+
+      this.updateStatus('Initializing GPU device...');
+
       // Initialize deck waveform runtime
       this.runtime = new GPURuntime({ canvas: this.deckCanvas });
       await this.runtime.initialize();
 
       const ctx = this.runtime.getContext();
 
+      this.updateStatus('Creating waveform component...');
+
       // Create and initialize waveform component
       this.waveformComponent = new DeckWaveformComponent(0);
       await this.waveformComponent.initialize(this.runtime.getDevice(), ctx);
+
+      this.updateStatus('Creating meters component...');
 
       // Create meters runtime (separate canvas)
       const metersRuntime = new GPURuntime({ canvas: this.metersCanvas });
@@ -81,55 +141,165 @@ class DJVisualizationApp {
 
       // Set up event handlers
       this.setupEventHandlers();
+      this.setupKeyboardShortcuts();
 
       // Handle resize
       this.handleResize();
-      window.addEventListener('resize', () => { this.handleResize(); });
+      window.addEventListener('resize', () => {
+        this.handleResize();
+      });
+
+      // Show main UI
+      this.showMainUI();
 
       // Start render loop
       this.lastTime = performance.now() / 1000;
+      this.lastFPSUpdate = performance.now();
       this.render();
 
       // Update info display
       this.updateInfoDisplay();
 
-      console.log('WebGPU DJ Visualization initialized successfully');
+      // Update GPU stats display
+      this.updateGPUStats();
+
+      console.log('WebGPU DJ Visualization initialized successfully', this.gpuInfo);
     } catch (error) {
       console.error('Failed to initialize WebGPU:', error);
-      this.showError(`Failed to initialize WebGPU: ${error instanceof Error ? error.message : String(error)}`);
+      this.showError(
+        `Failed to initialize WebGPU:<br><br>${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private extractLimits(limits: GPUSupportedLimits): Record<string, number> {
+    const result: Record<string, number> = {};
+    const keys = [
+      'maxTextureDimension2D',
+      'maxTextureArrayLayers',
+      'maxBindGroups',
+      'maxUniformBufferBindingSize',
+      'maxStorageBufferBindingSize',
+    ];
+
+    for (const key of keys) {
+      const value = limits[key as keyof GPUSupportedLimits];
+      if (typeof value === 'number') {
+        result[key] = value;
+      }
+    }
+
+    return result;
+  }
+
+  private updateStatus(text: string): void {
+    const statusText = document.getElementById('status-text');
+    const loadingText = document.querySelector('.loading-text');
+
+    if (statusText) {
+      statusText.textContent = text;
+    }
+    if (loadingText) {
+      loadingText.textContent = text;
+    }
+  }
+
+  private showMainUI(): void {
+    // Hide loading, show main UI
+    const loading = document.getElementById('loading');
+    const deckContainer = document.getElementById('deck-a-container');
+    const metersContainer = document.getElementById('meters-container');
+    const gpuStats = document.getElementById('gpu-stats');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+
+    if (loading) {
+      loading.style.display = 'none';
+    }
+    if (deckContainer) {
+      deckContainer.style.display = 'block';
+    }
+    if (metersContainer) {
+      metersContainer.style.display = 'block';
+    }
+    if (gpuStats) {
+      gpuStats.style.display = 'block';
+    }
+    if (statusDot) {
+      statusDot.classList.add('ready');
+    }
+    if (statusText) {
+      statusText.textContent = 'Ready';
+    }
+  }
+
+  private updateTrackInfo(): void {
+    const titleEl = document.getElementById('track-title');
+    const artistEl = document.getElementById('track-artist');
+
+    if (titleEl) {
+      titleEl.textContent = this.deckState.trackTitle || 'Unknown Track';
+    }
+    if (artistEl) {
+      artistEl.textContent = this.deckState.trackArtist || 'Unknown Artist';
+    }
+  }
+
+  private updateGPUStats(): void {
+    const gpuInfoEl = document.getElementById('gpu-info');
+
+    if (gpuInfoEl && this.gpuInfo) {
+      const info = this.gpuInfo.adapter;
+      const gpuName = info.device || info.description || 'Unknown GPU';
+      gpuInfoEl.textContent = gpuName.length > 30 ? gpuName.slice(0, 30) + '...' : gpuName;
     }
   }
 
   private setupEventHandlers(): void {
-    // Zoom control
+    // Zoom control with value display
     const zoomSlider = document.getElementById('zoom-a') as HTMLInputElement | null;
+    const zoomValue = document.getElementById('zoom-value');
+
     if (zoomSlider && this.waveformComponent) {
       zoomSlider.addEventListener('input', () => {
         const zoom = parseFloat(zoomSlider.value);
         this.waveformComponent?.setZoom(zoom);
+        if (zoomValue) {
+          zoomValue.textContent = `${zoom.toFixed(1)}x`;
+        }
       });
     }
 
-    // Band gain controls
+    // Band gain controls with value displays
     const lowGainSlider = document.getElementById('low-gain-a') as HTMLInputElement | null;
     const midGainSlider = document.getElementById('mid-gain-a') as HTMLInputElement | null;
     const highGainSlider = document.getElementById('high-gain-a') as HTMLInputElement | null;
 
+    const lowValue = document.getElementById('low-value');
+    const midValue = document.getElementById('mid-value');
+    const highValue = document.getElementById('high-value');
+
     if (lowGainSlider) {
       lowGainSlider.addEventListener('input', () => {
-        this.waveformComponent?.setKnobState({ lowGain: parseFloat(lowGainSlider.value) });
+        const value = parseFloat(lowGainSlider.value);
+        this.waveformComponent?.setKnobState({ lowGain: value });
+        if (lowValue) lowValue.textContent = value.toFixed(1);
       });
     }
 
     if (midGainSlider) {
       midGainSlider.addEventListener('input', () => {
-        this.waveformComponent?.setKnobState({ midGain: parseFloat(midGainSlider.value) });
+        const value = parseFloat(midGainSlider.value);
+        this.waveformComponent?.setKnobState({ midGain: value });
+        if (midValue) midValue.textContent = value.toFixed(1);
       });
     }
 
     if (highGainSlider) {
       highGainSlider.addEventListener('input', () => {
-        this.waveformComponent?.setKnobState({ highGain: parseFloat(highGainSlider.value) });
+        const value = parseFloat(highGainSlider.value);
+        this.waveformComponent?.setKnobState({ highGain: value });
+        if (highValue) highValue.textContent = value.toFixed(1);
       });
     }
 
@@ -137,9 +307,7 @@ class DJVisualizationApp {
     const playButton = document.getElementById('play-a') as HTMLButtonElement | null;
     if (playButton) {
       playButton.addEventListener('click', () => {
-        this.isPlaying = !this.isPlaying;
-        playButton.textContent = this.isPlaying ? 'Pause' : 'Play';
-        playButton.classList.toggle('active', this.isPlaying);
+        this.togglePlay();
       });
     }
 
@@ -147,15 +315,15 @@ class DJVisualizationApp {
     const loopButton = document.getElementById('loop-a') as HTMLButtonElement | null;
     if (loopButton) {
       loopButton.addEventListener('click', () => {
-        this.loopActive = !this.loopActive;
-        this.deckState = {
-          ...this.deckState,
-          loop: {
-            ...this.deckState.loop,
-            active: this.loopActive,
-          },
-        };
-        loopButton.classList.toggle('active', this.loopActive);
+        this.toggleLoop();
+      });
+    }
+
+    // Reset button
+    const resetButton = document.getElementById('reset-a') as HTMLButtonElement | null;
+    if (resetButton) {
+      resetButton.addEventListener('click', () => {
+        this.resetPlayhead();
       });
     }
 
@@ -169,6 +337,11 @@ class DJVisualizationApp {
         const newZoom = Math.max(0.1, Math.min(10, currentZoom * delta));
         zoomSlider.value = newZoom.toString();
         this.waveformComponent.setZoom(newZoom);
+
+        const zoomValue = document.getElementById('zoom-value');
+        if (zoomValue) {
+          zoomValue.textContent = `${newZoom.toFixed(1)}x`;
+        }
       }
     });
 
@@ -201,11 +374,85 @@ class DJVisualizationApp {
           playheadSamples: newPlayhead,
         },
       };
+
+      this.updateInfoDisplay();
     });
   }
 
+  private setupKeyboardShortcuts(): void {
+    document.addEventListener('keydown', (e) => {
+      // Ignore if typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      switch (e.key.toLowerCase()) {
+        case ' ':
+          e.preventDefault();
+          this.togglePlay();
+          break;
+        case 'l':
+          this.toggleLoop();
+          break;
+        case 'r':
+          this.resetPlayhead();
+          break;
+      }
+    });
+  }
+
+  private togglePlay(): void {
+    this.isPlaying = !this.isPlaying;
+
+    const playButton = document.getElementById('play-a') as HTMLButtonElement | null;
+    const playIcon = document.getElementById('play-icon');
+
+    if (playButton) {
+      playButton.classList.toggle('active', this.isPlaying);
+      const buttonText = playButton.childNodes[1];
+      if (buttonText) {
+        buttonText.textContent = this.isPlaying ? ' Pause' : ' Play';
+      }
+    }
+
+    if (playIcon) {
+      playIcon.textContent = this.isPlaying ? '⏸' : '▶';
+    }
+  }
+
+  private toggleLoop(): void {
+    this.loopActive = !this.loopActive;
+    this.deckState = {
+      ...this.deckState,
+      loop: {
+        ...this.deckState.loop,
+        active: this.loopActive,
+      },
+    };
+
+    const loopButton = document.getElementById('loop-a') as HTMLButtonElement | null;
+    if (loopButton) {
+      loopButton.classList.toggle('active', this.loopActive);
+    }
+  }
+
+  private resetPlayhead(): void {
+    this.deckState = {
+      ...this.deckState,
+      transport: {
+        ...this.deckState.transport,
+        playheadSamples: 0,
+        barIndex: 0,
+        beatInBar: 0,
+      },
+    };
+    this.updateInfoDisplay();
+  }
+
   private handleResize(): void {
-    if (!this.runtime || !this.waveformComponent) {return;}
+    if (!this.runtime || !this.waveformComponent) {
+      return;
+    }
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -234,6 +481,20 @@ class DJVisualizationApp {
     const currentTime = performance.now() / 1000;
     const deltaTime = currentTime - this.lastTime;
     this.lastTime = currentTime;
+
+    // Update FPS counter
+    this.frameCount++;
+    const now = performance.now();
+    if (now - this.lastFPSUpdate >= 1000) {
+      this.currentFPS = this.frameCount;
+      this.frameCount = 0;
+      this.lastFPSUpdate = now;
+
+      const fpsEl = document.getElementById('fps');
+      if (fpsEl) {
+        fpsEl.textContent = this.currentFPS.toString();
+      }
+    }
 
     // Update deck state if playing
     if (this.isPlaying) {
@@ -273,15 +534,21 @@ class DJVisualizationApp {
     }
 
     // Schedule next frame
-    this.animationFrameId = requestAnimationFrame(() => { this.render(); });
+    this.animationFrameId = requestAnimationFrame(() => {
+      this.render();
+    });
   }
 
   private updateInfoDisplay(): void {
     const info = document.getElementById('info-a');
-    if (!info) {return;}
+    if (!info) {
+      return;
+    }
 
-    const playheadSeconds = this.deckState.transport.playheadSamples / this.deckState.waveform.sampleRate;
-    const totalSeconds = this.deckState.waveform.totalSamples / this.deckState.waveform.sampleRate;
+    const playheadSeconds =
+      this.deckState.transport.playheadSamples / this.deckState.waveform.sampleRate;
+    const totalSeconds =
+      this.deckState.waveform.totalSamples / this.deckState.waveform.sampleRate;
 
     const formatTime = (seconds: number): string => {
       const mins = Math.floor(seconds / 60);
@@ -289,14 +556,40 @@ class DJVisualizationApp {
       return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
-    info.textContent = `${formatTime(playheadSeconds)} / ${formatTime(totalSeconds)} | ${this.deckState.transport.bpm} BPM | Bar ${this.deckState.transport.barIndex + 1} Beat ${this.deckState.transport.beatInBar + 1}`;
+    const loopIndicator = this.loopActive ? ' | LOOP' : '';
+
+    info.textContent =
+      `${formatTime(playheadSeconds)} / ${formatTime(totalSeconds)} | ` +
+      `${this.deckState.transport.bpm} BPM | ` +
+      `Bar ${this.deckState.transport.barIndex + 1} Beat ${this.deckState.transport.beatInBar + 1}` +
+      loopIndicator;
   }
 
   private showError(message: string): void {
     const errorDiv = document.getElementById('error');
+    const errorMessage = document.getElementById('error-message');
+    const loading = document.getElementById('loading');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+
     if (errorDiv) {
       errorDiv.style.display = 'block';
-      errorDiv.textContent = message;
+    }
+
+    if (errorMessage) {
+      errorMessage.innerHTML = message;
+    }
+
+    if (loading) {
+      loading.style.display = 'none';
+    }
+
+    if (statusDot) {
+      statusDot.classList.add('error');
+    }
+
+    if (statusText) {
+      statusText.textContent = 'Error';
     }
 
     // Hide deck containers
@@ -314,11 +607,19 @@ class DJVisualizationApp {
   }
 }
 
-// Initialize application
-const app = new DJVisualizationApp();
-app.initialize().catch(console.error);
+// Initialize application when DOM is ready
+function initApp(): void {
+  const app = new DJVisualizationApp();
+  app.initialize().catch(console.error);
 
-// Clean up on page unload
-window.addEventListener('beforeunload', () => {
-  app.destroy();
-});
+  // Clean up on page unload
+  window.addEventListener('beforeunload', () => {
+    app.destroy();
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
