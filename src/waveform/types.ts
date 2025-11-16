@@ -89,20 +89,27 @@ export interface DeckWaveform {
 /**
  * GPU-side uniform buffer layout.
  * Must match the WGSL struct WaveUniforms exactly.
+ *
+ * Note: playheadSamples is split into high/low components for better precision
+ * when dealing with long tracks (>5min at 44.1kHz = >13M samples).
+ * f32 only has 24 bits of mantissa, so we split into two floats.
  */
 export interface WaveUniformsData {
   viewWidth: number;
   viewHeight: number;
-  playheadSamples: number;  // note: stored as f32, precision considerations apply
+  playheadSamplesHigh: number;  // High-order component (floor division by 2^16)
+  playheadSamplesLow: number;   // Low-order component (remainder)
   sampleRate: number;
-  rate: number;             // playback rate
-  zoomLevel: number;        // dimensionless zoom factor
-  samplesPerPixel: number;  // current LOD's samples per pixel
+  rate: number;                 // playback rate
+  zoomLevel: number;            // dimensionless zoom factor
+  samplesPerPixel: number;      // current LOD's samples per pixel
   lodLengthInPixels: number;
+  totalSamples: number;         // total track length for boundary clamping
   bandCount: number;
-  waveformCenterY: number;  // vertical center of waveform (0..1)
-  waveformMaxHeight: number; // max vertical extent (0..1)
-  time: number;             // current time in seconds
+  waveformCenterY: number;      // vertical center of waveform (0..1)
+  waveformMaxHeight: number;    // max vertical extent (0..1)
+  time: number;                 // current time in seconds
+  // Additional padding to reach 16-byte alignment (64 bytes total = 16 floats)
 }
 
 /**
