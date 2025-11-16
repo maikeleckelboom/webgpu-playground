@@ -297,10 +297,17 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       });
     }
 
-    // Upload amplitude data
+    // Upload amplitude data - use the Float32Array directly to ensure correct data layout
+    // Note: We need to pass the actual array data, not just the buffer (which may have offsets)
+    const amplitudeData = new Float32Array(lod.lengthInPixels * 2);
+    for (let i = 0; i < lod.lengthInPixels; i++) {
+      amplitudeData[i * 2 + 0] = lod.amplitude[i * 2 + 0] ?? 0; // min
+      amplitudeData[i * 2 + 1] = lod.amplitude[i * 2 + 1] ?? 0; // max
+    }
+
     this.device.queue.writeTexture(
       { texture: amplitudeTexture },
-      lod.amplitude.buffer as ArrayBuffer,
+      amplitudeData,
       { bytesPerRow: lod.lengthInPixels * 8 }, // 2 floats * 4 bytes
       { width: lod.lengthInPixels, height: 1 }
     );
@@ -421,11 +428,32 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       0, // padding
     ]);
 
+    // Log uniform values once after waveform upload for debugging
+    if (this.waveformUploaded && !this.hasLoggedFirstFrame) {
+      console.log('[DeckWaveformComponent] Uniform values being set:', {
+        playheadSamples: deckState.transport.playheadSamples,
+        playheadHigh,
+        playheadLow,
+        sampleRate: deckState.waveform.sampleRate,
+        totalSamples: deckState.waveform.totalSamples,
+        viewWidth: this.dimensions.physicalWidth,
+        viewHeight: this.dimensions.physicalHeight,
+        samplesPerPixel: this.getBaseSamplesPerPixel() / this.zoom,
+        lodIndex: this.currentLODIndex,
+        lodSamplesPerPixel: lod.samplesPerPixel,
+        lodLengthInPixels: lod.lengthInPixels,
+        bandCount: deckState.waveform.bands.bandCount,
+      });
+    }
+
     this.device.queue.writeBuffer(this.resources.uniformBuffer, 0, uniformData);
   }
 
   encode(encoder: GPUCommandEncoder, view: GPUTextureView): void {
-    if (!this.resources || !this.ctx) {return;}
+    if (!this.resources || !this.ctx) {
+      console.warn('[DeckWaveformComponent] encode() skipped: resources or ctx is null');
+      return;
+    }
 
     // Log first frame in development to prove render is being called
     if (!this.hasLoggedFirstFrame) {
@@ -433,6 +461,8 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
         hasTextures: Boolean(this.resources.amplitudeTexture && this.resources.bandsTexture),
         waveformUploaded: this.waveformUploaded,
         dimensions: this.dimensions,
+        hasSharedBindGroup: Boolean(this.ctx.sharedBindGroup),
+        hasWaveformBindGroup: Boolean(this.resources.bindGroup),
       });
       this.hasLoggedFirstFrame = true;
     }
