@@ -57,17 +57,46 @@ export class GPURuntime {
     }
 
     this.format = navigator.gpu.getPreferredCanvasFormat();
-    this.context.configure({
-      device: this.device,
-      format: this.format,
-      alphaMode: 'premultiplied',
+
+    // CRITICAL: Don't configure context here if canvas has zero dimensions
+    // The context will be configured properly in resize() after UI is visible
+    const rect = this.canvas.getBoundingClientRect();
+    console.log('[GPURuntime] Initialize - canvas dimensions:', {
+      clientWidth: this.canvas.clientWidth,
+      clientHeight: this.canvas.clientHeight,
+      rectWidth: rect.width,
+      rectHeight: rect.height,
     });
+
+    // Only configure if we have non-zero dimensions
+    if (rect.width > 0 && rect.height > 0) {
+      this.context.configure({
+        device: this.device,
+        format: this.format,
+        alphaMode: 'premultiplied',
+      });
+    } else {
+      console.warn('[GPURuntime] Skipping initial context configuration - canvas has zero dimensions');
+    }
 
     // Create shared resources
     this.createSharedResources();
 
-    // Initial resize
-    this.resize(this.canvas.clientWidth, this.canvas.clientHeight, window.devicePixelRatio);
+    // Initial resize - only if canvas is visible
+    if (rect.width > 0 && rect.height > 0) {
+      this.resize(rect.width, rect.height, window.devicePixelRatio);
+    } else {
+      // Set placeholder dimensions - will be updated when resize() is called after UI is shown
+      this.dimensions = {
+        width: 1,
+        height: 1,
+        dpr: window.devicePixelRatio || 1,
+        physicalWidth: 1,
+        physicalHeight: 1,
+      };
+      this.canvas.width = 1;
+      this.canvas.height = 1;
+    }
   }
 
   private createSharedResources(): void {
@@ -107,6 +136,13 @@ export class GPURuntime {
   }
 
   resize(width: number, height: number, dpr: number): void {
+    console.log('[GPURuntime] resize() called:', { width, height, dpr });
+
+    if (width <= 0 || height <= 0) {
+      console.error('[GPURuntime] Invalid resize dimensions!', { width, height });
+      return;
+    }
+
     this.dimensions = {
       width,
       height,
@@ -118,13 +154,21 @@ export class GPURuntime {
     this.canvas.width = this.dimensions.physicalWidth;
     this.canvas.height = this.dimensions.physicalHeight;
 
-    // Reconfigure context if needed
+    console.log('[GPURuntime] Canvas physical size set to:', {
+      width: this.canvas.width,
+      height: this.canvas.height,
+    });
+
+    // ALWAYS reconfigure context to ensure it matches canvas size
     if (this.context && this.device) {
       this.context.configure({
         device: this.device,
         format: this.format,
         alphaMode: 'premultiplied',
       });
+      console.log('[GPURuntime] WebGPU context configured successfully');
+    } else {
+      console.error('[GPURuntime] Cannot configure context - missing context or device!');
     }
   }
 

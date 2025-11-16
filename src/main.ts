@@ -692,12 +692,30 @@ class DJVisualizationApp {
 
     // Update and render waveform
     if (this.runtime && this.waveformComponent) {
+      // CRITICAL: Check canvas dimensions on first frame
+      if (this.frameCount === 1) {
+        const dims = this.runtime.getDimensions();
+        console.log('[Render] First frame - runtime dimensions:', dims);
+        if (dims.physicalWidth <= 1 || dims.physicalHeight <= 1) {
+          console.error('[Render] CRITICAL: Canvas has invalid dimensions! Forcing resize...');
+          this.handleResize();
+        }
+      }
+
       this.runtime.updateSharedUniforms(currentTime, deltaTime);
 
       this.waveformComponent.update(deltaTime, currentTime, this.audioState);
 
       const texture = this.runtime.getCurrentTexture();
       if (texture) {
+        // Log texture size on first frame
+        if (this.frameCount === 1) {
+          console.log('[Render] Texture size:', {
+            width: texture.width,
+            height: texture.height,
+            format: texture.format,
+          });
+        }
         const encoder = this.runtime.getDevice().createCommandEncoder();
         const textureView = texture.createView();
         this.waveformComponent.encode(encoder, textureView);
