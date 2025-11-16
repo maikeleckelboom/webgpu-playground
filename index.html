@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebGPU DJ Waveform</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #0a0a0f;
+      color: #e0e0e0;
+      overflow: hidden;
+    }
+
+    #app {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .deck-container {
+      width: 90%;
+      max-width: 1400px;
+      background: #1a1a24;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .deck-label {
+      color: #888;
+      font-size: 14px;
+      margin-bottom: 8px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+
+    canvas {
+      width: 100%;
+      height: 200px;
+      border-radius: 8px;
+      background: #0d0d12;
+    }
+
+    .controls {
+      margin-top: 16px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .control-group label {
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    input[type="range"] {
+      width: 120px;
+      accent-color: #4a9eff;
+    }
+
+    button {
+      background: #2a2a3a;
+      border: 1px solid #3a3a4a;
+      color: #e0e0e0;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      background: #3a3a4a;
+      border-color: #4a9eff;
+    }
+
+    button.active {
+      background: #4a9eff;
+      border-color: #4a9eff;
+    }
+
+    .info {
+      color: #666;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+
+    .meters {
+      position: fixed;
+      right: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    #error {
+      color: #ff6b6b;
+      background: rgba(255, 107, 107, 0.1);
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 600px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="error" style="display: none;"></div>
+
+    <div class="deck-container" id="deck-a-container">
+      <div class="deck-label">DECK A</div>
+      <canvas id="deck-a"></canvas>
+      <div class="controls">
+        <div class="control-group">
+          <label>Zoom</label>
+          <input type="range" id="zoom-a" min="0.1" max="10" step="0.1" value="1">
+        </div>
+        <div class="control-group">
+          <label>Low Gain</label>
+          <input type="range" id="low-gain-a" min="0" max="2" step="0.1" value="1">
+        </div>
+        <div class="control-group">
+          <label>Mid Gain</label>
+          <input type="range" id="mid-gain-a" min="0" max="2" step="0.1" value="1">
+        </div>
+        <div class="control-group">
+          <label>High Gain</label>
+          <input type="range" id="high-gain-a" min="0" max="2" step="0.1" value="1">
+        </div>
+        <button id="play-a">Play</button>
+        <button id="loop-a">Loop</button>
+      </div>
+      <div class="info" id="info-a"></div>
+    </div>
+
+    <div class="meters">
+      <canvas id="meters" width="100" height="300"></canvas>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
