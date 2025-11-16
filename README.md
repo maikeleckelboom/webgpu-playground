@@ -124,6 +124,14 @@ npm run typecheck
 
 ## Usage
 
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Space` | Play/Pause playback |
+| `L` | Toggle loop region |
+| `R` | Reset playhead to beginning |
+
 ### Basic Interaction
 
 - **Mouse Wheel**: Zoom in/out (centered on playhead)
@@ -131,6 +139,7 @@ npm run typecheck
 - **Sliders**: Adjust zoom and band gains
 - **Play/Pause**: Toggle playback simulation
 - **Loop**: Toggle loop region
+- **Reset**: Jump to track beginning
 
 ### Integrating with Real Audio
 

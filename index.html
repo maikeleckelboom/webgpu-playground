@@ -3,8 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebGPU DJ Waveform</title>
+  <meta name="description" content="WebGPU-powered DJ waveform visualization demo showcasing real-time GPU rendering">
+  <meta name="theme-color" content="#0a0a0f">
+  <title>WebGPU DJ Waveform | Demo</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect fill='%234a9eff' width='100' height='100' rx='20'/%3E%3Cpath d='M25 30h50v10H25zm0 20h50v10H25zm0 20h50v10H25z' fill='%23fff'/%3E%3C/svg%3E">
   <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #1a1a24;
+      --bg-tertiary: #2a2a3a;
+      --accent: #4a9eff;
+      --accent-hover: #6ab0ff;
+      --text-primary: #e0e0e0;
+      --text-secondary: #888;
+      --text-muted: #666;
+      --border: #3a3a4a;
+      --error: #ff6b6b;
+      --success: #69db7c;
+      --warning: #ffd43b;
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -12,37 +30,199 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-      background: #0a0a0f;
-      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
       overflow: hidden;
+      min-height: 100vh;
     }
 
+    /* Header */
+    .header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo-icon svg {
+      width: 20px;
+      height: 20px;
+      fill: white;
+    }
+
+    .logo-text {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .logo-text span {
+      color: var(--accent);
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      animation: pulse 2s infinite;
+    }
+
+    .status-dot.ready {
+      background: var(--success);
+    }
+
+    .status-dot.error {
+      background: var(--error);
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Main Content */
     #app {
       width: 100vw;
       height: 100vh;
+      padding-top: 56px;
+      padding-bottom: 48px;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 24px;
+    }
+
+    /* Loading State */
+    .loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       gap: 20px;
     }
 
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    /* Error State */
+    #error {
+      display: none;
+      color: var(--error);
+      background: rgba(255, 107, 107, 0.1);
+      padding: 24px;
+      border-radius: 12px;
+      max-width: 600px;
+      text-align: center;
+      border: 1px solid rgba(255, 107, 107, 0.3);
+    }
+
+    #error h3 {
+      margin-bottom: 12px;
+      font-size: 18px;
+    }
+
+    #error p {
+      line-height: 1.6;
+    }
+
+    #error a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    #error a:hover {
+      text-decoration: underline;
+    }
+
+    /* Deck Container */
     .deck-container {
       width: 90%;
       max-width: 1400px;
-      background: #1a1a24;
+      background: var(--bg-secondary);
       border-radius: 12px;
-      padding: 16px;
+      padding: 20px;
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      border: 1px solid var(--border);
+    }
+
+    .deck-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
     }
 
     .deck-label {
-      color: #888;
-      font-size: 14px;
-      margin-bottom: 8px;
+      color: var(--text-secondary);
+      font-size: 13px;
       font-weight: 600;
-      letter-spacing: 1px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .track-info {
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+    }
+
+    .track-title {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .track-artist {
+      color: var(--text-muted);
     }
 
     canvas {
@@ -50,111 +230,365 @@
       height: 200px;
       border-radius: 8px;
       background: #0d0d12;
+      cursor: crosshair;
     }
 
     .controls {
       margin-top: 16px;
       display: flex;
-      gap: 12px;
+      gap: 16px;
       align-items: center;
+      flex-wrap: wrap;
     }
 
     .control-group {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 6px;
     }
 
     .control-group label {
       font-size: 11px;
-      color: #666;
+      color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      font-weight: 500;
     }
 
     input[type="range"] {
-      width: 120px;
-      accent-color: #4a9eff;
+      width: 100px;
+      height: 4px;
+      -webkit-appearance: none;
+      background: var(--bg-tertiary);
+      border-radius: 2px;
+      outline: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      background: var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      background: var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
+
+    .control-value {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-align: center;
+      min-width: 40px;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-left: auto;
     }
 
     button {
-      background: #2a2a3a;
-      border: 1px solid #3a3a4a;
-      color: #e0e0e0;
-      padding: 8px 16px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      padding: 10px 20px;
       border-radius: 6px;
       cursor: pointer;
-      font-size: 14px;
-      transition: all 0.2s;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
     button:hover {
-      background: #3a3a4a;
-      border-color: #4a9eff;
+      background: var(--border);
+      border-color: var(--accent);
     }
 
     button.active {
-      background: #4a9eff;
-      border-color: #4a9eff;
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    button kbd {
+      font-size: 10px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px 4px;
+      border-radius: 3px;
+      font-family: monospace;
     }
 
     .info {
-      color: #666;
-      font-size: 12px;
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-top: 12px;
+      font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+      background: var(--bg-primary);
+      padding: 8px 12px;
+      border-radius: 6px;
+      display: inline-block;
+    }
+
+    /* Meters */
+    .meters {
+      position: fixed;
+      right: 24px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: var(--bg-secondary);
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+
+    .meters canvas {
+      width: 80px;
+      height: 280px;
+      background: var(--bg-primary);
+    }
+
+    .meters-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      text-align: center;
       margin-top: 8px;
     }
 
-    .meters {
+    /* Footer */
+    .footer {
       position: fixed;
-      right: 20px;
-      top: 50%;
-      transform: translateY(-50%);
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      font-size: 12px;
+      color: var(--text-muted);
+      z-index: 100;
     }
 
-    #error {
-      color: #ff6b6b;
-      background: rgba(255, 107, 107, 0.1);
-      padding: 20px;
-      border-radius: 8px;
-      max-width: 600px;
-      text-align: center;
+    .footer-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .footer kbd {
+      background: var(--bg-tertiary);
+      padding: 3px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
+      border: 1px solid var(--border);
+    }
+
+    .footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .header {
+        padding: 0 16px;
+      }
+
+      .deck-container {
+        width: 95%;
+        padding: 16px;
+      }
+
+      .controls {
+        gap: 12px;
+      }
+
+      input[type="range"] {
+        width: 80px;
+      }
+
+      .meters {
+        display: none;
+      }
+
+      .footer {
+        display: none;
+      }
+    }
+
+    /* Animations */
+    .fade-in {
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* GPU Stats */
+    .gpu-stats {
+      position: fixed;
+      bottom: 56px;
+      left: 16px;
+      background: var(--bg-secondary);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: monospace;
+      border: 1px solid var(--border);
+      opacity: 0.7;
+      transition: opacity 0.2s;
+    }
+
+    .gpu-stats:hover {
+      opacity: 1;
     }
   </style>
 </head>
 <body>
-  <div id="app">
-    <div id="error" style="display: none;"></div>
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24">
+          <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
+        </svg>
+      </div>
+      <div class="logo-text">WebGPU <span>Waveform</span></div>
+    </div>
+    <div class="status-badge">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">Initializing...</span>
+    </div>
+  </header>
 
-    <div class="deck-container" id="deck-a-container">
-      <div class="deck-label">DECK A</div>
-      <canvas id="deck-a"></canvas>
+  <!-- Main Application -->
+  <div id="app">
+    <!-- Loading State -->
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <div class="loading-text">Initializing WebGPU...</div>
+    </div>
+
+    <!-- Error State -->
+    <div id="error">
+      <h3>WebGPU Not Available</h3>
+      <p id="error-message"></p>
+    </div>
+
+    <!-- Deck Container -->
+    <div class="deck-container fade-in" id="deck-a-container" style="display: none;">
+      <div class="deck-header">
+        <div class="deck-label">DECK A</div>
+        <div class="track-info">
+          <span class="track-title" id="track-title">Test Track</span>
+          <span class="track-artist" id="track-artist">Test Artist</span>
+        </div>
+      </div>
+      <canvas id="deck-a" title="Click to seek, scroll to zoom"></canvas>
       <div class="controls">
         <div class="control-group">
           <label>Zoom</label>
           <input type="range" id="zoom-a" min="0.1" max="10" step="0.1" value="1">
+          <div class="control-value" id="zoom-value">1.0x</div>
         </div>
         <div class="control-group">
-          <label>Low Gain</label>
+          <label>Low</label>
           <input type="range" id="low-gain-a" min="0" max="2" step="0.1" value="1">
+          <div class="control-value" id="low-value">1.0</div>
         </div>
         <div class="control-group">
-          <label>Mid Gain</label>
+          <label>Mid</label>
           <input type="range" id="mid-gain-a" min="0" max="2" step="0.1" value="1">
+          <div class="control-value" id="mid-value">1.0</div>
         </div>
         <div class="control-group">
-          <label>High Gain</label>
+          <label>High</label>
           <input type="range" id="high-gain-a" min="0" max="2" step="0.1" value="1">
+          <div class="control-value" id="high-value">1.0</div>
         </div>
-        <button id="play-a">Play</button>
-        <button id="loop-a">Loop</button>
+        <div class="button-group">
+          <button id="play-a">
+            <span id="play-icon">▶</span> Play
+            <kbd>Space</kbd>
+          </button>
+          <button id="loop-a">
+            ↻ Loop
+            <kbd>L</kbd>
+          </button>
+          <button id="reset-a" title="Reset to beginning">
+            ⟲ Reset
+            <kbd>R</kbd>
+          </button>
+        </div>
       </div>
-      <div class="info" id="info-a"></div>
+      <div class="info" id="info-a">--:-- / --:-- | --- BPM</div>
     </div>
 
-    <div class="meters">
-      <canvas id="meters" width="100" height="300"></canvas>
+    <!-- Meters Display -->
+    <div class="meters" id="meters-container" style="display: none;">
+      <canvas id="meters" width="80" height="280"></canvas>
+      <div class="meters-label">Levels</div>
     </div>
   </div>
+
+  <!-- GPU Stats -->
+  <div class="gpu-stats" id="gpu-stats" style="display: none;">
+    FPS: <span id="fps">0</span> | GPU: <span id="gpu-info">--</span>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-item">
+      <kbd>Space</kbd> Play/Pause
+    </div>
+    <div class="footer-item">
+      <kbd>L</kbd> Toggle Loop
+    </div>
+    <div class="footer-item">
+      <kbd>R</kbd> Reset
+    </div>
+    <div class="footer-item">
+      <kbd>Scroll</kbd> Zoom
+    </div>
+    <div class="footer-item">
+      Powered by <a href="https://www.w3.org/TR/webgpu/" target="_blank" rel="noopener">WebGPU</a>
+    </div>
+  </footer>
 
   <script type="module" src="/src/main.ts"></script>
 </body>
