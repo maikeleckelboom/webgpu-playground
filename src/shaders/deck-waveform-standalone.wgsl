@@ -20,12 +20,19 @@ struct WaveUniforms {
     waveformCenterY: f32,
     waveformMaxHeight: f32,
     time: f32,
+    // LOD blending parameters
+    lodBlendFactor: f32,           // blend factor between primary and secondary LOD (0..1)
+    secondarySamplesPerPixel: f32, // secondary LOD's samples per pixel
+    secondaryLodLengthInPixels: f32, // secondary LOD's length
+    beatPhaseOffset: f32,          // beat grid phase offset (0..1)
 }
 
 @group(0) @binding(0) var<uniform> uniforms: WaveUniforms;
 @group(0) @binding(1) var amplitudeTex: texture_2d<f32>;
 @group(0) @binding(2) var bandsTex: texture_2d<f32>;
-@group(0) @binding(3) var texSampler: sampler;
+@group(0) @binding(3) var secondaryAmplitudeTex: texture_2d<f32>;
+@group(0) @binding(4) var secondaryBandsTex: texture_2d<f32>;
+@group(0) @binding(5) var texSampler: sampler;
 
 // Vertex output / Fragment input
 struct VertexOutput {
@@ -59,6 +66,66 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 fn reconstruct_playhead() -> f32 {
     let splitFactor = 65536.0; // 2^16
     return uniforms.playheadSamplesHigh * splitFactor + uniforms.playheadSamplesLow;
+}
+
+// Sample amplitude and bands from a specific LOD
+fn sample_lod_primary(samplePosition: f32) -> vec4<f32> {
+    let pixelIndexFloat = samplePosition / uniforms.samplesPerPixel;
+    let texCoordX = clamp(pixelIndexFloat / uniforms.lodLengthInPixels, 0.0, 1.0);
+
+    let amplitude = textureSample(amplitudeTex, texSampler, vec2<f32>(texCoordX, 0.5)).r;
+
+    var bands = vec3<f32>(0.0);
+    if (uniforms.bandCount >= 3u) {
+        let bandTexHeight = f32(uniforms.bandCount);
+        let lowY = 0.5 / bandTexHeight;
+        let midY = 1.5 / bandTexHeight;
+        let highY = 2.5 / bandTexHeight;
+        bands.x = textureSample(bandsTex, texSampler, vec2<f32>(texCoordX, lowY)).r;
+        bands.y = textureSample(bandsTex, texSampler, vec2<f32>(texCoordX, midY)).r;
+        bands.z = textureSample(bandsTex, texSampler, vec2<f32>(texCoordX, highY)).r;
+    } else {
+        bands = vec3<f32>(amplitude);
+    }
+
+    return vec4<f32>(bands, amplitude);
+}
+
+fn sample_lod_secondary(samplePosition: f32) -> vec4<f32> {
+    let pixelIndexFloat = samplePosition / uniforms.secondarySamplesPerPixel;
+    let texCoordX = clamp(pixelIndexFloat / uniforms.secondaryLodLengthInPixels, 0.0, 1.0);
+
+    let amplitude = textureSample(secondaryAmplitudeTex, texSampler, vec2<f32>(texCoordX, 0.5)).r;
+
+    var bands = vec3<f32>(0.0);
+    if (uniforms.bandCount >= 3u) {
+        let bandTexHeight = f32(uniforms.bandCount);
+        let lowY = 0.5 / bandTexHeight;
+        let midY = 1.5 / bandTexHeight;
+        let highY = 2.5 / bandTexHeight;
+        bands.x = textureSample(secondaryBandsTex, texSampler, vec2<f32>(texCoordX, lowY)).r;
+        bands.y = textureSample(secondaryBandsTex, texSampler, vec2<f32>(texCoordX, midY)).r;
+        bands.z = textureSample(secondaryBandsTex, texSampler, vec2<f32>(texCoordX, highY)).r;
+    } else {
+        bands = vec3<f32>(amplitude);
+    }
+
+    return vec4<f32>(bands, amplitude);
+}
+
+// Blend between two LODs using the blend factor
+fn sample_blended_lod(samplePosition: f32) -> vec4<f32> {
+    let primaryData = sample_lod_primary(samplePosition);
+
+    // If blend factor is 0, skip secondary sampling
+    if (uniforms.lodBlendFactor < 0.001) {
+        return primaryData;
+    }
+
+    let secondaryData = sample_lod_secondary(samplePosition);
+
+    // Blend the actual texture samples, not just metadata
+    return mix(primaryData, secondaryData, uniforms.lodBlendFactor);
 }
 
 // =============================================================================
@@ -196,31 +263,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let gapDarkening = mix(0.7, 1.0, columnMask);
 
     // ==========================================================================
-    // Sample Waveform Data
+    // Sample Waveform Data (with LOD blending for smooth transitions)
     // ==========================================================================
 
-    let amplitudeValue = textureSample(amplitudeTex, texSampler, vec2<f32>(clampedTexCoordX, 0.5)).r;
-    let amplitude = clamp(amplitudeValue, 0.0, 1.0);
-
-    var bands = vec3<f32>(0.0, 0.0, 0.0);
-
-    if (uniforms.bandCount >= 3u) {
-        let bandTexHeight = f32(uniforms.bandCount);
-        let lowY = 0.5 / bandTexHeight;
-        let midY = 1.5 / bandTexHeight;
-        let highY = 2.5 / bandTexHeight;
-
-        bands.x = textureSample(bandsTex, texSampler, vec2<f32>(clampedTexCoordX, lowY)).r;
-        bands.y = textureSample(bandsTex, texSampler, vec2<f32>(clampedTexCoordX, midY)).r;
-        bands.z = textureSample(bandsTex, texSampler, vec2<f32>(clampedTexCoordX, highY)).r;
-    } else if (uniforms.bandCount == 1u) {
-        bands = vec3<f32>(amplitude, amplitude, amplitude);
-    } else if (uniforms.bandCount == 2u) {
-        let bandTexHeight = f32(uniforms.bandCount);
-        bands.x = textureSample(bandsTex, texSampler, vec2<f32>(clampedTexCoordX, 0.5 / bandTexHeight)).r;
-        bands.z = textureSample(bandsTex, texSampler, vec2<f32>(clampedTexCoordX, 1.5 / bandTexHeight)).r;
-        bands.y = (bands.x + bands.z) * 0.5;
-    }
+    // Use blended LOD sampling for smooth transitions between detail levels
+    let blendedData = sample_blended_lod(samplePosition);
+    var bands = vec3<f32>(blendedData.x, blendedData.y, blendedData.z);
+    let amplitude = clamp(blendedData.w, 0.0, 1.0);
 
     bands = clamp(bands, vec3<f32>(0.0), vec3<f32>(1.0));
 
@@ -301,6 +350,31 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let innerGlow = combinedColor * edgeGlow;
 
     // ==========================================================================
+    // Beat Grid Rendering (with phase offset support)
+    // ==========================================================================
+
+    // Calculate beat grid positions
+    let samplesPerBeat = (uniforms.sampleRate * 60.0) / f32(128u); // Use 128 BPM as default
+    let beatSamplePosition = samplePosition + uniforms.beatPhaseOffset * samplesPerBeat;
+    let beatPhase = fract(beatSamplePosition / samplesPerBeat);
+
+    // Render beat markers as subtle vertical lines
+    let beatLineWidth = 0.5 / uniforms.viewWidth;
+    let beatDistance = abs(beatPhase - 0.5);
+
+    // Stronger line for downbeats (every 4 beats)
+    let barPhase = fract(beatSamplePosition / (samplesPerBeat * 4.0));
+    let barDistance = abs(barPhase - 0.5);
+
+    // Beat marker intensity (subtle)
+    let beatMarkerIntensity = smoothstep(0.02, 0.0, beatDistance) * 0.15;
+    let barMarkerIntensity = smoothstep(0.01, 0.0, barDistance) * 0.25;
+    let gridIntensity = max(beatMarkerIntensity, barMarkerIntensity);
+
+    // Beat grid color (subtle orange/yellow)
+    let beatGridColor = vec3<f32>(1.0, 0.7, 0.3);
+
+    // ==========================================================================
     // Playhead Rendering
     // ==========================================================================
 
@@ -323,6 +397,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Mix waveform and background
     var finalColor = mix(backgroundColor, waveformColor + innerGlow, shapedEdge);
+
+    // Add beat grid overlay (subtle, behind waveform)
+    finalColor = mix(finalColor, beatGridColor, gridIntensity * (1.0 - shapedEdge * 0.5));
 
     // Overlay playhead on top
     finalColor = mix(finalColor, playheadColor, playheadIntensity * 0.95);

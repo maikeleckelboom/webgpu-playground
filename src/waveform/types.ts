@@ -53,6 +53,7 @@ export interface DeckTransportState {
   readonly playheadSamples: number;  // can grow large; treat precision carefully
   readonly rate: number;             // playback rate (1.0 = "normal speed")
   readonly bpm: number;              // for future grid/beat-aware visuals
+  readonly beatPhaseOffset?: number; // beat grid phase offset (0..1), default 0
 }
 
 // =============================================================================
@@ -109,7 +110,12 @@ export interface WaveUniformsData {
   waveformCenterY: number;      // vertical center of waveform (0..1)
   waveformMaxHeight: number;    // max vertical extent (0..1)
   time: number;                 // current time in seconds
-  // Additional padding to reach 16-byte alignment (64 bytes total = 16 floats)
+  // LOD blending parameters
+  lodBlendFactor: number;       // blend factor between primary and secondary LOD (0..1)
+  secondarySamplesPerPixel: number;  // secondary LOD's samples per pixel
+  secondaryLodLengthInPixels: number; // secondary LOD's length
+  beatPhaseOffset: number;      // beat grid phase offset (0..1)
+  // Total: 18 floats = 72 bytes, padded to 80 bytes for 16-byte alignment
 }
 
 /**

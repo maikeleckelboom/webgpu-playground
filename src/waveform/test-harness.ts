@@ -246,6 +246,7 @@ export function runTestHarness(
     playheadSamples: 0,
     rate: 1.0,
     bpm: 128,
+    beatPhaseOffset: 0,
   };
 
   waveform.updateTransport(transport);
@@ -329,6 +330,21 @@ export function setPlaybackRate(state: TestHarnessState, rate: number): void {
   state.transport = {
     ...state.transport,
     rate,
+  };
+  state.waveform.updateTransport(state.transport);
+}
+
+/**
+ * Set beat phase offset (0..1).
+ * This shifts the beat grid alignment to match the actual track's first downbeat.
+ */
+export function setBeatPhaseOffset(state: TestHarnessState, offset: number): void {
+  // Clamp to valid range [0, 1)
+  const normalizedOffset = ((offset % 1) + 1) % 1;
+  // eslint-disable-next-line no-param-reassign
+  state.transport = {
+    ...state.transport,
+    beatPhaseOffset: normalizedOffset,
   };
   state.waveform.updateTransport(state.transport);
 }

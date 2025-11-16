@@ -9,6 +9,7 @@ import {
   setZoomLevel,
   seekToPosition,
   setPlaybackRate,
+  setBeatPhaseOffset,
   destroyTestHarness,
 } from './test-harness.ts';
 
@@ -138,6 +139,19 @@ function setupControls(
       setPlaybackRate(state, speed);
       if (speedValue) {
         speedValue.textContent = `${speed.toFixed(1)}x`;
+      }
+    });
+  }
+
+  // Beat phase offset slider
+  const beatPhaseSlider = document.getElementById('beat-phase-slider') as HTMLInputElement | null;
+  const beatPhaseValue = document.getElementById('beat-phase-value');
+  if (beatPhaseSlider) {
+    beatPhaseSlider.addEventListener('input', () => {
+      const phase = parseFloat(beatPhaseSlider.value);
+      setBeatPhaseOffset(state, phase);
+      if (beatPhaseValue) {
+        beatPhaseValue.textContent = phase.toFixed(2);
       }
     });
   }
