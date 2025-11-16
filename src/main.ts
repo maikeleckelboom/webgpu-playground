@@ -161,14 +161,14 @@ class DJVisualizationApp {
       this.setupEventHandlers();
       this.setupKeyboardShortcuts();
 
-      // Handle resize
+      // CRITICAL: Show main UI FIRST so canvas has non-zero dimensions
+      this.showMainUI();
+
+      // Handle resize AFTER UI is visible (canvas needs to be visible to have dimensions)
       this.handleResize();
       window.addEventListener('resize', () => {
         this.handleResize();
       });
-
-      // Show main UI
-      this.showMainUI();
 
       // Start render loop
       this.lastTime = performance.now() / 1000;

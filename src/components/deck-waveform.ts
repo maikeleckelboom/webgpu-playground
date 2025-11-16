@@ -486,7 +486,7 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       this.hasLoggedFirstFrame = true;
     }
 
-    // CRITICAL: Use a bright, unmissable clear color to verify render pass works
+    // Clear to dark blue - matches shader gradient base color
     const renderPass = encoder.beginRenderPass({
       label: 'Waveform Render Pass',
       colorAttachments: [
@@ -494,8 +494,7 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
           view,
           loadOp: 'clear',
           storeOp: 'store',
-          // Use BRIGHT RED clear color - if we see black, the render pass isn't executing at all
-          clearValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+          clearValue: { r: 0.05, g: 0.06, b: 0.12, a: 1.0 },
         },
       ],
     });
