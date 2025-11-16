@@ -518,6 +518,15 @@
           <span class="track-title" id="track-title">Test Track</span>
           <span class="track-artist" id="track-artist">Test Artist</span>
         </div>
+        <div class="file-upload">
+          <label for="track-upload" style="font-size: 12px; color: var(--text-muted); margin-right: 8px;">Load Track:</label>
+          <input
+            id="track-upload"
+            type="file"
+            accept="audio/wav,audio/x-wav,audio/mpeg,audio/mp3,audio/ogg,audio/flac"
+            style="font-size: 11px; color: var(--text-secondary); max-width: 200px;"
+          />
+        </div>
       </div>
       <canvas id="deck-a" title="Click to seek, scroll to zoom"></canvas>
       <div class="controls">

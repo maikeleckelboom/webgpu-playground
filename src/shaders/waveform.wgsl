@@ -126,6 +126,7 @@ fn sampleAmplitude(lodCoord: f32) -> vec2<f32> {
   if (lodCoord < 0.0 || lodCoord > 1.0) {
     return vec2<f32>(0.0, 0.0);
   }
+  // Texture is 1D (height=1), so Y coordinate should be 0.5 (center of single row)
   let texCoord = vec2<f32>(lodCoord, 0.5);
   let sample = textureSample(amplitudeTex, texSampler, texCoord);
   return vec2<f32>(sample.r, sample.g); // min, max
@@ -134,8 +135,9 @@ fn sampleAmplitude(lodCoord: f32) -> vec2<f32> {
 // Sample band energies (low, mid, high)
 fn sampleBands(lodCoord: f32) -> vec3<f32> {
   if (lodCoord < 0.0 || lodCoord > 1.0) {
-    return vec3<f32>(0.0, 0.0, 0.0);
+    return vec3<f32>(0.33, 0.33, 0.34); // Return balanced bands for out-of-bounds
   }
+  // Texture is 1D (height=1), so Y coordinate should be 0.5 (center of single row)
   let texCoord = vec2<f32>(lodCoord, 0.5);
   let sample = textureSample(bandsTex, texSampler, texCoord);
   return vec3<f32>(sample.r, sample.g, sample.b);
@@ -218,60 +220,82 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
   let screenY = input.uv.y * waveform.viewHeight;
   let normalizedY = input.uv.y; // 0 at top, 1 at bottom
 
-  // Background gradient
-  var color = vec3<f32>(0.05, 0.05, 0.07);
-  color = mix(color, vec3<f32>(0.03, 0.03, 0.05), normalizedY);
+  // Background gradient (dark blue at top → dark purple at bottom)
+  // This is ALWAYS drawn to prove the pipeline is alive
+  var color = vec3<f32>(0.05, 0.06, 0.12); // Dark blue
+  color = mix(color, vec3<f32>(0.08, 0.04, 0.10), normalizedY); // Dark purple at bottom
 
-  // Get sample position for this screen X
-  let samplePos = screenXToSample(screenX);
-  let lodCoord = sampleToLODCoord(samplePos);
-
-  // Sample waveform data
-  let amplitude = sampleAmplitude(lodCoord);
-  let bands = sampleBands(lodCoord);
-
-  // Map amplitude to vertical position
-  // Waveform is centered vertically
-  let centerY = 0.5;
-  let waveformHeight = 0.8; // Use 80% of vertical space
-
-  let minY = centerY - amplitude.x * waveformHeight * 0.5;
-  let maxY = centerY + amplitude.y * waveformHeight * 0.5;
-
-  // Check if current pixel is within waveform
-  let inWaveform = normalizedY >= minY && normalizedY <= maxY;
-
-  if (inWaveform) {
-    // Color based on band energies
-    let waveColor = bandsToColor(bands);
-
-    // Add edge glow
-    let distFromEdge = min(normalizedY - minY, maxY - normalizedY);
-    let edgeFactor = smoothstep(0.0, 0.02, distFromEdge);
-
-    color = mix(waveColor * 1.5, waveColor, edgeFactor);
+  // Draw faint horizontal center line (debug)
+  let centerYLine = abs(normalizedY - 0.5);
+  if (centerYLine < 0.002) {
+    color = mix(color, vec3<f32>(0.2, 0.2, 0.3), 0.5);
   }
 
-  // Draw beat grid
-  let gridIntensity = drawBeatGrid(samplePos);
-  if (gridIntensity > 0.0) {
-    color = mix(color, vec3<f32>(0.5, 0.5, 0.6), gridIntensity);
-  }
-
-  // Draw loop region
-  let loopIntensity = drawLoopRegion(samplePos);
-  if (loopIntensity > 0.0) {
-    color = mix(color, vec3<f32>(0.2, 0.8, 0.2), loopIntensity);
-  }
-
-  // Draw center playhead
+  // Draw center playhead FIRST (always visible, even without data)
   let centerPixelX = waveform.viewWidth * 0.5;
   let distFromCenter = abs(screenX - centerPixelX);
-  if (distFromCenter < 1.5) {
+  var hasPlayhead = false;
+  if (distFromCenter < 2.0) {
     color = vec3<f32>(1.0, 1.0, 1.0);
-  } else if (distFromCenter < 3.0) {
-    let glowFactor = 1.0 - (distFromCenter - 1.5) / 1.5;
-    color = mix(color, vec3<f32>(1.0, 1.0, 1.0), glowFactor * 0.5);
+    hasPlayhead = true;
+  } else if (distFromCenter < 4.0) {
+    let glowFactor = 1.0 - (distFromCenter - 2.0) / 2.0;
+    color = mix(color, vec3<f32>(1.0, 1.0, 1.0), glowFactor * 0.6);
+  }
+
+  // Only render waveform if we have valid data
+  if (waveform.totalSamples > 0.0 && waveform.lodLengthInPixels > 0.0 && !hasPlayhead) {
+    // Get sample position for this screen X
+    let samplePos = screenXToSample(screenX);
+    let lodCoord = sampleToLODCoord(samplePos);
+
+    // Sample waveform data
+    let amplitude = sampleAmplitude(lodCoord);
+    let bands = sampleBands(lodCoord);
+
+    // Map amplitude to vertical position
+    // Waveform is centered vertically
+    let centerY = 0.5;
+    let waveformHeight = 0.8; // Use 80% of vertical space
+
+    // FIX: amplitude.x is min (negative extent), amplitude.y is max (positive extent)
+    // Both should scale the full waveformHeight
+    let minY = centerY - amplitude.y * waveformHeight; // max goes up
+    let maxY = centerY + amplitude.x * waveformHeight; // min goes down (but it's stored as positive)
+
+    // Actually, since our test data stores min/max as positive values representing extent:
+    // amplitude.x = min extent (how far down from center, as positive number)
+    // amplitude.y = max extent (how far up from center)
+    // So we need: top of waveform at centerY - amplitude.y * height
+    //             bottom of waveform at centerY + amplitude.x * height
+    let waveformTopY = centerY - amplitude.y * waveformHeight;
+    let waveformBottomY = centerY + amplitude.x * waveformHeight;
+
+    // Check if current pixel is within waveform envelope
+    let inWaveform = normalizedY >= waveformTopY && normalizedY <= waveformBottomY;
+
+    if (inWaveform && (amplitude.x > 0.0 || amplitude.y > 0.0)) {
+      // Color based on band energies
+      let waveColor = bandsToColor(bands);
+
+      // Add edge glow
+      let distFromEdge = min(normalizedY - waveformTopY, waveformBottomY - normalizedY);
+      let edgeFactor = smoothstep(0.0, 0.02, distFromEdge);
+
+      color = mix(waveColor * 1.5, waveColor, edgeFactor);
+    }
+
+    // Draw beat grid
+    let gridIntensity = drawBeatGrid(samplePos);
+    if (gridIntensity > 0.0) {
+      color = mix(color, vec3<f32>(0.5, 0.5, 0.6), gridIntensity);
+    }
+
+    // Draw loop region
+    let loopIntensity = drawLoopRegion(samplePos);
+    if (loopIntensity > 0.0) {
+      color = mix(color, vec3<f32>(0.2, 0.8, 0.2), loopIntensity);
+    }
   }
 
   return vec4<f32>(color, 1.0);
