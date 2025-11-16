@@ -195,17 +195,19 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
 
     this.currentDeckState = deckState;
 
-    // Upload waveform data if not done yet or if marked dirty
-    if ((!this.waveformUploaded || this.waveformDirty) && deckState.waveform) {
+    // Select appropriate LOD based on zoom FIRST
+    const newLODIndex = this.selectLOD(deckState.waveform);
+    const lodChanged = newLODIndex !== this.currentLODIndex;
+    this.currentLODIndex = newLODIndex;
+
+    // Upload waveform data if not done yet, marked dirty, or LOD changed
+    if ((!this.waveformUploaded || this.waveformDirty || lodChanged) && deckState.waveform) {
       if (deckState.waveform.lods.length > 0 && deckState.waveform.totalSamples > 0) {
         this.uploadWaveformData(deckState.waveform);
         this.waveformUploaded = true;
         this.waveformDirty = false;
       }
     }
-
-    // Select appropriate LOD based on zoom
-    this.currentLODIndex = this.selectLOD(deckState.waveform);
 
     // Update uniforms
     this.updateUniforms(deckState);
@@ -251,10 +253,9 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       return;
     }
 
-    // Select the best LOD for current view - prefer one with reasonable resolution
-    // Middle LOD is a good default, but ensure it exists
+    // Use the currently selected LOD index (based on zoom level)
     const lodIndex = Math.min(
-      Math.floor(pyramid.lods.length / 2),
+      Math.max(0, this.currentLODIndex),
       pyramid.lods.length - 1
     );
     const lod = pyramid.lods[lodIndex];
