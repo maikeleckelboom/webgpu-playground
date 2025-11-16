@@ -278,7 +278,7 @@ export function writeUniforms(
   floatView[12] = data.waveformMaxHeight;
   floatView[13] = data.time;
   floatView[14] = data.bpm;
-  // Remaining slot (15) is padding for 16-byte alignment
+  floatView[15] = data.beatPhaseOffset;
 
   device.queue.writeBuffer(buffer, 0, arrayBuffer);
 }

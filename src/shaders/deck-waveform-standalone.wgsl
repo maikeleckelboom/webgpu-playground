@@ -21,6 +21,7 @@ struct WaveUniforms {
     waveformMaxHeight: f32,
     time: f32,
     bpm: f32,
+    beatPhaseOffset: f32,  // Beat grid phase offset in samples
 }
 
 @group(0) @binding(0) var<uniform> uniforms: WaveUniforms;
@@ -69,9 +70,10 @@ fn reconstruct_playhead() -> f32 {
 // Map band energies to color with dominant frequency emphasis
 fn color_from_bands_v2(bands: vec3<f32>) -> vec3<f32> {
     // Serato-inspired frequency band colors (more saturated)
+    // High frequencies get extra brightness for prominence
     let lowColor = vec3<f32>(0.98, 0.22, 0.12);   // Pure red/orange for bass
-    let midColor = vec3<f32>(0.12, 0.92, 0.32);   // Vibrant green for mids
-    let highColor = vec3<f32>(0.15, 0.58, 0.98);  // Bright blue for highs
+    let midColor = vec3<f32>(0.12, 0.95, 0.35);   // Vibrant green for mids
+    let highColor = vec3<f32>(0.35, 0.75, 1.0);   // Brighter cyan/blue for highs (enhanced)
 
     // Find the dominant band
     let maxBand = max(max(bands.x, bands.y), bands.z);
@@ -81,12 +83,12 @@ fn color_from_bands_v2(bands: vec3<f32>) -> vec3<f32> {
     let dominanceRatio = (maxBand - minBand) / (maxBand + 1e-4);
 
     // Apply stronger non-linear emphasis
-    let emphasis = 3.0;
-    let b = vec3<f32>(
-        pow(bands.x, emphasis),
-        pow(bands.y, emphasis),
-        pow(bands.z, emphasis)
-    );
+    // Higher emphasis for highs to make them pop more
+    let lowEmph = pow(bands.x, 3.0);
+    let midEmph = pow(bands.y, 3.0);
+    let highEmph = pow(bands.z, 2.5); // Less aggressive power for highs = more prominence
+
+    let b = vec3<f32>(lowEmph, midEmph, highEmph);
 
     // Normalize
     let sum = max(b.x + b.y + b.z, 1e-4);
@@ -95,6 +97,11 @@ fn color_from_bands_v2(bands: vec3<f32>) -> vec3<f32> {
     // Weighted color blend
     var color = lowColor * weights.x + midColor * weights.y + highColor * weights.z;
 
+    // Additional brightness boost when highs are dominant
+    let highDominance = bands.z / (maxBand + 1e-4);
+    let highBoost = 1.0 + highDominance * 0.3; // Up to 30% brighter for high-dominant
+    color = color * highBoost;
+
     // Boost saturation based on dominance (more dominant = more saturated)
     let luminance = dot(color, vec3<f32>(0.299, 0.587, 0.114));
     let saturationBoost = 1.2 + dominanceRatio * 0.8; // Range: 1.2 to 2.0
@@ -102,7 +109,7 @@ fn color_from_bands_v2(bands: vec3<f32>) -> vec3<f32> {
 
     // Ensure minimum saturation by clamping away from gray
     let gray = vec3<f32>(luminance);
-    let saturationFloor = 0.6;
+    let saturationFloor = 0.65; // Increased floor for more vivid colors
     let currentSaturation = length(color - gray) / (luminance + 0.1);
     if (currentSaturation < saturationFloor && maxBand > 0.1) {
         // Push color away from gray
@@ -175,23 +182,42 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Discrete Column Rendering (Serato-Style Thin Bars)
     // ==========================================================================
 
+    // Calculate how many waveform pixels map to one screen pixel
+    // This helps us adapt column rendering to avoid aliasing at extreme zoom
+    let screenPixelsPerWaveformColumn = uniforms.viewWidth / (uniforms.lodLengthInPixels * uniforms.zoomLevel * 0.1);
+
     // Get the fractional position within the current waveform column
     let columnFraction = fract(pixelIndexFloat);
 
-    // Render thin vertical bars instead of continuous envelope
-    // Column width scales with zoom: thinner at higher zoom (more detail)
-    let columnWidth = clamp(0.4 + uniforms.zoomLevel * 0.1, 0.4, 0.85);
+    // Adaptive column width based on density:
+    // - At high zoom (few samples per pixel), show thin discrete bars
+    // - At low zoom (many samples per pixel), widen bars to reduce aliasing
+    var columnWidth = 0.0;
+    if (screenPixelsPerWaveformColumn > 2.0) {
+        // High zoom: thin discrete columns (0.5-0.7)
+        columnWidth = clamp(0.5 + uniforms.zoomLevel * 0.05, 0.5, 0.7);
+    } else if (screenPixelsPerWaveformColumn > 0.5) {
+        // Medium zoom: wider columns to reduce gaps (0.7-0.85)
+        columnWidth = clamp(0.7 + (2.0 - screenPixelsPerWaveformColumn) * 0.15, 0.7, 0.85);
+    } else {
+        // Low zoom: nearly continuous to avoid moiré patterns (0.85-0.95)
+        let continuityFactor = clamp(1.0 - screenPixelsPerWaveformColumn * 2.0, 0.0, 1.0);
+        columnWidth = 0.85 + continuityFactor * 0.1;
+    }
 
     // Create column mask: 1.0 in center of column, 0.0 at edges
     let distFromColumnCenter = abs(columnFraction - 0.5);
     let halfWidth = columnWidth * 0.5;
 
     // Smooth column edges for anti-aliasing
-    let columnEdgeWidth = 0.05;
+    // Wider AA at low zoom to reduce shimmer
+    let columnEdgeWidth = mix(0.05, 0.15, clamp(1.0 - screenPixelsPerWaveformColumn, 0.0, 1.0));
     let columnMask = smoothstep(halfWidth + columnEdgeWidth, halfWidth - columnEdgeWidth, distFromColumnCenter);
 
     // Inter-column gap darkening (subtle separation between columns)
-    let gapDarkening = mix(0.7, 1.0, columnMask);
+    // Reduce darkening at low zoom where columns are nearly continuous
+    let gapStrength = mix(0.7, 0.9, clamp(1.0 - screenPixelsPerWaveformColumn, 0.0, 1.0));
+    let gapDarkening = mix(gapStrength, 1.0, columnMask);
 
     // ==========================================================================
     // Sample Waveform Data
@@ -260,8 +286,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Define layer colors with depth cues
     let lowLayerColor = vec3<f32>(0.98, 0.22, 0.12) * 0.8;  // Red/orange, darker (back)
-    let midLayerColor = vec3<f32>(0.12, 0.92, 0.32) * 0.9;  // Green, medium brightness
-    let highLayerColor = vec3<f32>(0.15, 0.58, 0.98) * 1.0; // Blue, brightest (front)
+    let midLayerColor = vec3<f32>(0.12, 0.95, 0.35) * 0.9;  // Green, medium brightness
+    let highLayerColor = vec3<f32>(0.35, 0.75, 1.0) * 1.1;  // Bright cyan, extra bright (front)
 
     // Compose layers from back to front (additive-like blending)
     let brightness = compute_brightness(amplitude);
@@ -302,9 +328,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Beat Grid Rendering (Serato-Style Visual Timing Cues)
     // ==========================================================================
 
-    // Calculate beat position in samples
+    // Calculate beat position in samples with phase offset support
     let samplesPerBeat = (60.0 / uniforms.bpm) * uniforms.sampleRate;
-    let beatIndex = samplePosition / samplesPerBeat;
+    // Apply phase offset: shift sample position by the offset so beat grid aligns correctly
+    let adjustedSamplePosition = samplePosition - uniforms.beatPhaseOffset;
+    let beatIndex = adjustedSamplePosition / samplesPerBeat;
     let beatFraction = fract(beatIndex);
 
     // Render subtle vertical lines at beat positions

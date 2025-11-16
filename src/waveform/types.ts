@@ -110,7 +110,7 @@ export interface WaveUniformsData {
   waveformMaxHeight: number;    // max vertical extent (0..1)
   time: number;                 // current time in seconds
   bpm: number;                  // beats per minute for beat grid
-  // One padding slot remaining to reach 16-byte alignment (64 bytes total = 16 floats)
+  beatPhaseOffset: number;      // beat grid phase offset in samples (0 = beat 1 at sample 0)
 }
 
 /**

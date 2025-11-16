@@ -48,6 +48,8 @@ interface DeckWaveformInternals {
   currentTransport: DeckTransportState;
   currentZoom: number;
   currentLODIndex: number;
+  targetLODIndex: number;        // For smooth LOD transitions
+  lodTransitionProgress: number; // 0..1, how far we are in transitioning
   viewWidth: number;
   viewHeight: number;
   dpr: number;
@@ -168,6 +170,8 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
     },
     currentZoom: 1.0,
     currentLODIndex: 0,
+    targetLODIndex: 0,
+    lodTransitionProgress: 1.0, // Start fully transitioned
     viewWidth: canvas.width,
     viewHeight: canvas.height,
     dpr: window.devicePixelRatio ?? 1,
@@ -192,7 +196,19 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
       internals.currentZoom
     );
 
-    internals.currentLODIndex = selectLODIndex(internals.pyramid, targetSamplesPerPixel);
+    const newTargetLOD = selectLODIndex(internals.pyramid, targetSamplesPerPixel);
+
+    // If target LOD changed, initiate smooth transition
+    if (newTargetLOD !== internals.targetLODIndex) {
+      // Only start new transition if we've completed the previous one
+      if (internals.lodTransitionProgress >= 1.0) {
+        internals.targetLODIndex = newTargetLOD;
+        internals.lodTransitionProgress = 0.0;
+      } else {
+        // Update target mid-transition (chain transitions)
+        internals.targetLODIndex = newTargetLOD;
+      }
+    }
   };
 
   const resize = (width: number, height: number, dpr: number): void => {
@@ -211,22 +227,53 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
       alphaMode: 'premultiplied',
     });
 
-    // Update LOD selection for new viewport
+    // Update LOD selection for new viewport (immediate switch on resize)
     const targetSamplesPerPixel = calculateSamplesPerPixel(
       width,
       internals.pyramid.bandConfig.sampleRate,
       internals.currentZoom
     );
 
-    internals.currentLODIndex = selectLODIndex(internals.pyramid, targetSamplesPerPixel);
+    const newLODIndex = selectLODIndex(internals.pyramid, targetSamplesPerPixel);
+    internals.currentLODIndex = newLODIndex;
+    internals.targetLODIndex = newLODIndex;
+    internals.lodTransitionProgress = 1.0; // No transition needed on resize
   };
 
-  const frame = (_dt: number, time: number): void => {
+  const frame = (dt: number, time: number): void => {
+    // Handle smooth LOD transitions
+    if (internals.lodTransitionProgress < 1.0) {
+      // Smooth transition speed: complete in ~150ms
+      const transitionSpeed = 6.0; // per second
+      internals.lodTransitionProgress = Math.min(
+        1.0,
+        internals.lodTransitionProgress + dt * transitionSpeed
+      );
+
+      // When transition completes, switch to target LOD
+      if (internals.lodTransitionProgress >= 1.0) {
+        internals.currentLODIndex = internals.targetLODIndex;
+      }
+    }
+
     // Select current LOD
     const currentLOD = internals.pyramid.lods[internals.currentLODIndex];
-    if (!currentLOD) {
+    const targetLOD = internals.pyramid.lods[internals.targetLODIndex];
+    if (!currentLOD || !targetLOD) {
       return;
     }
+
+    // Interpolate samplesPerPixel for smooth visual transition
+    // Use easing function for smoother transition
+    const easeProgress = internals.lodTransitionProgress < 1.0
+      ? 1.0 - Math.pow(1.0 - internals.lodTransitionProgress, 3.0) // ease-out cubic
+      : 1.0;
+
+    const interpolatedSamplesPerPixel = currentLOD.samplesPerPixel +
+      (targetLOD.samplesPerPixel - currentLOD.samplesPerPixel) * easeProgress;
+
+    const interpolatedLengthPixels = currentLOD.lengthInPixels +
+      (targetLOD.lengthInPixels - currentLOD.lengthInPixels) * easeProgress;
 
     // Split playhead into high/low for precision
     const { high: playheadHigh, low: playheadLow } = splitPlayheadSamples(
@@ -242,14 +289,15 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
       sampleRate: internals.pyramid.bandConfig.sampleRate,
       rate: internals.currentTransport.rate,
       zoomLevel: internals.currentZoom,
-      samplesPerPixel: currentLOD.samplesPerPixel,
-      lodLengthInPixels: currentLOD.lengthInPixels,
+      samplesPerPixel: interpolatedSamplesPerPixel,
+      lodLengthInPixels: interpolatedLengthPixels,
       totalSamples: internals.pyramid.totalSamples,
       bandCount: internals.pyramid.bandConfig.bandCount,
       waveformCenterY: 0.5,     // Center of canvas vertically
       waveformMaxHeight: 0.4,   // Use 80% of canvas height total
       time,
       bpm: internals.currentTransport.bpm,
+      beatPhaseOffset: 0.0,     // Default: beat 1 starts at sample 0
     };
 
     writeUniforms(internals.device, internals.uniformBuffer, uniformData);
