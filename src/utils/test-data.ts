@@ -66,7 +66,8 @@ export function generateTestWaveform(config: TestTrackConfig): WaveformPyramid {
 
       // Generate amplitude based on section and beat
       const beatPhase = beatPos % 1;
-      const barPhase = barPos % 1;
+      // barPhase could be used for bar-level modulation
+      void barPos;
 
       let baseAmplitude = 0.3;
 
@@ -162,11 +163,11 @@ function getTrackSection(
 ): 'intro' | 'verse' | 'breakdown' | 'drop' | 'outro' {
   const progress = timeSeconds / durationSeconds;
 
-  if (progress < 0.1) return 'intro';
-  if (progress < 0.3) return 'verse';
-  if (progress < 0.4) return 'breakdown';
-  if (progress < 0.7) return 'drop';
-  if (progress < 0.85) return 'breakdown';
+  if (progress < 0.1) {return 'intro';}
+  if (progress < 0.3) {return 'verse';}
+  if (progress < 0.4) {return 'breakdown';}
+  if (progress < 0.7) {return 'drop';}
+  if (progress < 0.85) {return 'breakdown';}
   return 'outro';
 }
 
@@ -307,7 +308,7 @@ export function updateTransportPlayback(
   deltaTime: number,
   isPlaying: boolean
 ): DeckState {
-  if (!isPlaying) return state;
+  if (!isPlaying) {return state;}
 
   const newPlayhead = state.transport.playheadSamples + state.waveform.sampleRate * deltaTime * state.transport.rate;
 

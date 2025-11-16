@@ -22,7 +22,7 @@ export class TrackOverviewComponent implements VisualComponent {
   readonly id: string;
 
   private device: GPUDevice | null = null;
-  private ctx: VisualContext | null = null;
+  private _ctx: VisualContext | null = null;
   private resources: OverviewGPUResources | null = null;
   private dimensions: Dimensions = {
     width: 800,
@@ -33,7 +33,7 @@ export class TrackOverviewComponent implements VisualComponent {
   };
 
   private deckIndex: number;
-  private waveformUploaded: boolean = false;
+  private waveformUploaded = false;
 
   constructor(deckIndex: number) {
     this.id = `track-overview-${deckIndex}`;
@@ -42,7 +42,7 @@ export class TrackOverviewComponent implements VisualComponent {
 
   async initialize(device: GPUDevice, ctx: VisualContext): Promise<void> {
     this.device = device;
-    this.ctx = ctx;
+    this._ctx = ctx;
 
     const shaderModule = device.createShaderModule({
       label: 'Overview Shader',
@@ -138,11 +138,11 @@ export class TrackOverviewComponent implements VisualComponent {
     this.dimensions = dim;
   }
 
-  update(dt: number, time: number, audio: AudioVisualState): void {
-    if (!this.device || !this.resources) return;
+  update(_dt: number, _time: number, audio: AudioVisualState): void {
+    if (!this.device || !this.resources) {return;}
 
     const deckState = audio.decks[this.deckIndex];
-    if (!deckState) return;
+    if (!deckState) {return;}
 
     // Upload waveform data (use lowest resolution LOD for overview)
     if (!this.waveformUploaded && deckState.waveform) {
@@ -168,7 +168,7 @@ export class TrackOverviewComponent implements VisualComponent {
   }
 
   private uploadWaveformData(pyramid: WaveformPyramid): void {
-    if (!this.device || !this.resources) return;
+    if (!this.device || !this.resources) {return;}
 
     // Use the lowest resolution LOD for overview
     const lod = pyramid.lods[pyramid.lods.length - 1];
@@ -184,7 +184,7 @@ export class TrackOverviewComponent implements VisualComponent {
 
     this.device.queue.writeTexture(
       { texture: amplitudeTexture },
-      lod.amplitude,
+      lod.amplitude.buffer as ArrayBuffer,
       { bytesPerRow: lod.lengthInPixels * 8 },
       { width: lod.lengthInPixels, height: 1 }
     );
@@ -202,7 +202,7 @@ export class TrackOverviewComponent implements VisualComponent {
   }
 
   encode(encoder: GPUCommandEncoder, view: GPUTextureView): void {
-    if (!this.resources) return;
+    if (!this.resources) {return;}
 
     const renderPass = encoder.beginRenderPass({
       label: 'Overview Render Pass',

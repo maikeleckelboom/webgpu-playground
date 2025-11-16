@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["@webgpu/types", "vitest/globals", "node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src/**/*", "tests/**/*", "e2e/**/*", "vitest.config.ts", "playwright.config.ts", "vite.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}
