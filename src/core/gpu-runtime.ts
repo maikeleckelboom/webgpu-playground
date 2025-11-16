@@ -107,12 +107,16 @@ export class GPURuntime {
   }
 
   resize(width: number, height: number, dpr: number): void {
+    // Ensure minimum dimensions to prevent zero-size swapchain errors
+    const safeWidth = Math.max(1, width);
+    const safeHeight = Math.max(1, height);
+
     this.dimensions = {
-      width,
-      height,
+      width: safeWidth,
+      height: safeHeight,
       dpr,
-      physicalWidth: Math.floor(width * dpr),
-      physicalHeight: Math.floor(height * dpr),
+      physicalWidth: Math.max(1, Math.floor(safeWidth * dpr)),
+      physicalHeight: Math.max(1, Math.floor(safeHeight * dpr)),
     };
 
     this.canvas.width = this.dimensions.physicalWidth;

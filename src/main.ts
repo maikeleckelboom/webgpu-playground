@@ -144,14 +144,14 @@ class DJVisualizationApp {
       this.setupEventHandlers();
       this.setupKeyboardShortcuts();
 
-      // Handle resize
+      // Show main UI first so canvas has proper dimensions
+      this.showMainUI();
+
+      // Handle resize after UI is visible
       this.handleResize();
       window.addEventListener('resize', () => {
         this.handleResize();
       });
-
-      // Show main UI
-      this.showMainUI();
 
       // Start render loop
       this.lastTime = performance.now() / 1000;
