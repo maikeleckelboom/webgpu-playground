@@ -124,12 +124,29 @@ class DJVisualizationApp {
       await this.runtime.initialize();
 
       const ctx = this.runtime.getContext();
+      const device = this.runtime.getDevice();
+
+      // Add GPU error handler to catch validation errors
+      device.addEventListener('uncapturederror', (event) => {
+        console.error('[GPU ERROR]', event.error);
+      });
+
+      // Push error scope to catch any pipeline creation errors
+      device.pushErrorScope('validation');
 
       this.updateStatus('Creating waveform component...');
 
       // Create and initialize waveform component
       this.waveformComponent = new DeckWaveformComponent(0);
-      await this.waveformComponent.initialize(this.runtime.getDevice(), ctx);
+      await this.waveformComponent.initialize(device, ctx);
+
+      // Check for any validation errors during component initialization
+      const initError = await device.popErrorScope();
+      if (initError) {
+        console.error('[GPU VALIDATION ERROR during init]', initError);
+      } else {
+        console.log('[GPU] Component initialization completed without validation errors');
+      }
 
       this.updateStatus('Creating meters component...');
 
@@ -606,6 +623,22 @@ class DJVisualizationApp {
 
     // Resize deck canvas
     const deckRect = this.deckCanvas.getBoundingClientRect();
+
+    console.log('[Resize] Canvas dimensions:', {
+      cssWidth: deckRect.width,
+      cssHeight: deckRect.height,
+      dpr,
+      physicalWidth: Math.floor(deckRect.width * dpr),
+      physicalHeight: Math.floor(deckRect.height * dpr),
+      currentCanvasWidth: this.deckCanvas.width,
+      currentCanvasHeight: this.deckCanvas.height,
+    });
+
+    if (deckRect.width === 0 || deckRect.height === 0) {
+      console.error('[Resize] Canvas has zero dimensions! Check CSS.');
+      return;
+    }
+
     this.runtime.resize(deckRect.width, deckRect.height, dpr);
     this.waveformComponent.resize(this.runtime.getDimensions());
 
@@ -666,9 +699,17 @@ class DJVisualizationApp {
       const texture = this.runtime.getCurrentTexture();
       if (texture) {
         const encoder = this.runtime.getDevice().createCommandEncoder();
-        this.waveformComponent.encode(encoder, texture.createView());
+        const textureView = texture.createView();
+        this.waveformComponent.encode(encoder, textureView);
         this.runtime.getDevice().queue.submit([encoder.finish()]);
+      } else if (this.frameCount === 1) {
+        console.error('[Render] getCurrentTexture() returned null!');
       }
+    } else if (this.frameCount === 1) {
+      console.error('[Render] runtime or waveformComponent is null!', {
+        runtime: Boolean(this.runtime),
+        waveformComponent: Boolean(this.waveformComponent),
+      });
     }
 
     // Update and render meters (using its own runtime - simplified for demo)

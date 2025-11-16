@@ -71,11 +71,28 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     this.device = device;
     this.ctx = ctx;
 
+    console.log('[DeckWaveformComponent] Initializing with context:', {
+      format: ctx.format,
+      hasSharedBindGroupLayout: Boolean(ctx.sharedBindGroupLayout),
+      hasSharedBindGroup: Boolean(ctx.sharedBindGroup),
+    });
+
     // Create shader module
     const shaderModule = device.createShaderModule({
       label: 'Waveform Shader',
       code: waveformShaderCode,
     });
+
+    // Check for shader compilation errors
+    const compilationInfo = await shaderModule.getCompilationInfo();
+    if (compilationInfo.messages.length > 0) {
+      console.error('[DeckWaveformComponent] Shader compilation messages:');
+      for (const msg of compilationInfo.messages) {
+        console.error(`  ${msg.type}: ${msg.message} (line ${msg.lineNum}, col ${msg.linePos})`);
+      }
+    } else {
+      console.log('[DeckWaveformComponent] Shader compiled successfully');
+    }
 
     // Create bind group layout
     const bindGroupLayout = device.createBindGroupLayout({
@@ -463,10 +480,13 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
         dimensions: this.dimensions,
         hasSharedBindGroup: Boolean(this.ctx.sharedBindGroup),
         hasWaveformBindGroup: Boolean(this.resources.bindGroup),
+        hasPipeline: Boolean(this.resources.pipeline),
+        textureViewProvided: Boolean(view),
       });
       this.hasLoggedFirstFrame = true;
     }
 
+    // CRITICAL: Use a bright, unmissable clear color to verify render pass works
     const renderPass = encoder.beginRenderPass({
       label: 'Waveform Render Pass',
       colorAttachments: [
@@ -474,8 +494,8 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
           view,
           loadOp: 'clear',
           storeOp: 'store',
-          // Clear to same color as shader gradient top (dark blue) - ensures non-black even if shader fails
-          clearValue: { r: 0.05, g: 0.06, b: 0.12, a: 1.0 },
+          // Use BRIGHT RED clear color - if we see black, the render pass isn't executing at all
+          clearValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
         },
       ],
     });
