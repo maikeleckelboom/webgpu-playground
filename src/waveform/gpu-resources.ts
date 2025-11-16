@@ -15,7 +15,7 @@ import type {
 // =============================================================================
 
 /** Size of the uniform buffer in bytes (must be 16-byte aligned) */
-const UNIFORM_BUFFER_SIZE = 64; // 16 floats * 4 bytes = 64 bytes (aligned)
+const UNIFORM_BUFFER_SIZE = 80; // 20 floats * 4 bytes = 80 bytes (aligned)
 
 // =============================================================================
 // Texture Creation
@@ -150,7 +150,9 @@ function float32ToFloat16(value: number): number {
 /**
  * Create the bind group layout for the waveform shader.
  * Group 0: uniforms
- * Group 1: amplitude texture + band texture + sampler
+ * Group 1: primary LOD amplitude texture + band texture
+ * Group 2: secondary LOD amplitude texture + band texture (for blending)
+ * Group 3: sampler
  */
 export function createBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
   return device.createBindGroupLayout({
@@ -163,20 +165,32 @@ export function createBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
         buffer: { type: 'uniform' },
       },
       {
-        // Amplitude texture
+        // Primary amplitude texture
         binding: 1,
         visibility: GPUShaderStage.FRAGMENT,
         texture: { sampleType: 'float', viewDimension: '2d' },
       },
       {
-        // Band texture
+        // Primary band texture
         binding: 2,
         visibility: GPUShaderStage.FRAGMENT,
         texture: { sampleType: 'float', viewDimension: '2d' },
       },
       {
-        // Texture sampler
+        // Secondary amplitude texture (for LOD blending)
         binding: 3,
+        visibility: GPUShaderStage.FRAGMENT,
+        texture: { sampleType: 'float', viewDimension: '2d' },
+      },
+      {
+        // Secondary band texture (for LOD blending)
+        binding: 4,
+        visibility: GPUShaderStage.FRAGMENT,
+        texture: { sampleType: 'float', viewDimension: '2d' },
+      },
+      {
+        // Texture sampler
+        binding: 5,
         visibility: GPUShaderStage.FRAGMENT,
         sampler: { type: 'filtering' },
       },
@@ -186,6 +200,7 @@ export function createBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
 
 /**
  * Create a bind group for a specific LOD's textures.
+ * @deprecated Use createDualLODBindGroup for LOD blending support
  */
 export function createLODBindGroup(
   device: GPUDevice,
@@ -195,6 +210,7 @@ export function createLODBindGroup(
   bandTexture: GPUTexture,
   sampler: GPUSampler
 ): GPUBindGroup {
+  // For backwards compatibility, bind same texture to both primary and secondary
   return device.createBindGroup({
     label: 'waveform-lod-bind-group',
     layout,
@@ -202,7 +218,37 @@ export function createLODBindGroup(
       { binding: 0, resource: { buffer: uniformBuffer } },
       { binding: 1, resource: amplitudeTexture.createView() },
       { binding: 2, resource: bandTexture.createView() },
-      { binding: 3, resource: sampler },
+      { binding: 3, resource: amplitudeTexture.createView() }, // Same as primary
+      { binding: 4, resource: bandTexture.createView() },       // Same as primary
+      { binding: 5, resource: sampler },
+    ],
+  });
+}
+
+/**
+ * Create a bind group for blending between two LODs.
+ * Primary LOD is the higher-detail (lower samplesPerPixel), secondary is lower-detail.
+ */
+export function createDualLODBindGroup(
+  device: GPUDevice,
+  layout: GPUBindGroupLayout,
+  uniformBuffer: GPUBuffer,
+  primaryAmplitudeTexture: GPUTexture,
+  primaryBandTexture: GPUTexture,
+  secondaryAmplitudeTexture: GPUTexture,
+  secondaryBandTexture: GPUTexture,
+  sampler: GPUSampler
+): GPUBindGroup {
+  return device.createBindGroup({
+    label: 'waveform-dual-lod-bind-group',
+    layout,
+    entries: [
+      { binding: 0, resource: { buffer: uniformBuffer } },
+      { binding: 1, resource: primaryAmplitudeTexture.createView() },
+      { binding: 2, resource: primaryBandTexture.createView() },
+      { binding: 3, resource: secondaryAmplitudeTexture.createView() },
+      { binding: 4, resource: secondaryBandTexture.createView() },
+      { binding: 5, resource: sampler },
     ],
   });
 }
@@ -261,7 +307,11 @@ export function writeUniforms(
   // offset 44: waveformCenterY (f32)
   // offset 48: waveformMaxHeight (f32)
   // offset 52: time (f32)
-  // offset 56-63: padding (to align to 16 bytes)
+  // offset 56: lodBlendFactor (f32)
+  // offset 60: secondarySamplesPerPixel (f32)
+  // offset 64: secondaryLodLengthInPixels (f32)
+  // offset 68: beatPhaseOffset (f32)
+  // offset 72-79: padding (to align to 16 bytes)
 
   floatView[0] = data.viewWidth;
   floatView[1] = data.viewHeight;
@@ -277,7 +327,11 @@ export function writeUniforms(
   floatView[11] = data.waveformCenterY;
   floatView[12] = data.waveformMaxHeight;
   floatView[13] = data.time;
-  // Remaining slots (14, 15) are padding for 16-byte alignment
+  floatView[14] = data.lodBlendFactor;
+  floatView[15] = data.secondarySamplesPerPixel;
+  floatView[16] = data.secondaryLodLengthInPixels;
+  floatView[17] = data.beatPhaseOffset;
+  // Remaining slots (18, 19) are padding for 16-byte alignment
 
   device.queue.writeBuffer(buffer, 0, arrayBuffer);
 }
@@ -384,4 +438,94 @@ export function calculateSamplesPerPixel(
   const secondsVisible = baseSecondsVisible / zoomLevel;
   const totalSamplesVisible = secondsVisible * sampleRate;
   return totalSamplesVisible / viewWidth;
+}
+
+/**
+ * Result of LOD blending calculation.
+ * Contains indices for primary and secondary LODs plus the blend factor.
+ */
+export interface LODBlendInfo {
+  primaryIndex: number;
+  secondaryIndex: number;
+  blendFactor: number; // 0.0 = 100% primary, 1.0 = 100% secondary
+}
+
+/**
+ * Calculate which two LODs to blend and the blend factor between them.
+ * Returns the two nearest LODs (in terms of samplesPerPixel) and interpolation factor.
+ * This enables smooth transitions between detail levels.
+ */
+export function calculateLODBlend(
+  pyramid: WaveformPyramid,
+  targetSamplesPerPixel: number
+): LODBlendInfo {
+  const { lods } = pyramid;
+
+  if (lods.length === 0) {
+    return { primaryIndex: 0, secondaryIndex: 0, blendFactor: 0 };
+  }
+
+  if (lods.length === 1) {
+    return { primaryIndex: 0, secondaryIndex: 0, blendFactor: 0 };
+  }
+
+  // Find the two LODs that bracket the target samplesPerPixel
+  // LODs are sorted from highest detail (low samplesPerPixel) to lowest detail (high samplesPerPixel)
+  let lowerIndex = 0; // Higher detail (lower samplesPerPixel)
+  let upperIndex = lods.length - 1; // Lower detail (higher samplesPerPixel)
+
+  for (let i = 0; i < lods.length - 1; i++) {
+    const currentLOD = lods[i];
+    const nextLOD = lods[i + 1];
+
+    if (!currentLOD || !nextLOD) {
+      continue;
+    }
+
+    // If target is between these two LODs
+    if (
+      targetSamplesPerPixel >= currentLOD.samplesPerPixel &&
+      targetSamplesPerPixel <= nextLOD.samplesPerPixel
+    ) {
+      lowerIndex = i;
+      upperIndex = i + 1;
+      break;
+    }
+
+    // If target is smaller than the first LOD (more detail needed than available)
+    if (i === 0 && targetSamplesPerPixel < currentLOD.samplesPerPixel) {
+      return { primaryIndex: 0, secondaryIndex: 0, blendFactor: 0 };
+    }
+  }
+
+  // If target is larger than the last LOD (less detail needed than available)
+  const lastLOD = lods[lods.length - 1];
+  if (lastLOD && targetSamplesPerPixel > lastLOD.samplesPerPixel) {
+    return {
+      primaryIndex: lods.length - 1,
+      secondaryIndex: lods.length - 1,
+      blendFactor: 0,
+    };
+  }
+
+  // Calculate blend factor using logarithmic interpolation for perceptually smooth transitions
+  const lowerLOD = lods[lowerIndex];
+  const upperLOD = lods[upperIndex];
+
+  if (!lowerLOD || !upperLOD) {
+    return { primaryIndex: lowerIndex, secondaryIndex: upperIndex, blendFactor: 0 };
+  }
+
+  // Use log scale for smooth perceptual blending
+  const logTarget = Math.log(targetSamplesPerPixel);
+  const logLower = Math.log(lowerLOD.samplesPerPixel);
+  const logUpper = Math.log(upperLOD.samplesPerPixel);
+
+  const blendFactor = Math.min(1.0, Math.max(0.0, (logTarget - logLower) / (logUpper - logLower)));
+
+  return {
+    primaryIndex: lowerIndex,
+    secondaryIndex: upperIndex,
+    blendFactor,
+  };
 }

@@ -17,9 +17,10 @@ import {
   writeUniforms,
   createAllLODResources,
   destroyLODResources,
-  selectLODIndex,
   calculateSamplesPerPixel,
   splitPlayheadSamples,
+  calculateLODBlend,
+  createDualLODBindGroup,
 } from './gpu-resources.ts';
 
 import shaderCode from '../shaders/deck-waveform-standalone.wgsl?raw';
@@ -50,6 +51,12 @@ interface DeckWaveformInternals {
   viewWidth: number;
   viewHeight: number;
   dpr: number;
+
+  // LOD blending state
+  currentPrimaryLODIndex: number;
+  currentSecondaryLODIndex: number;
+  currentLODBlendFactor: number;
+  currentBindGroup: GPUBindGroup | null;
 
   // Waveform pyramid reference
   pyramid: typeof options.waveform;
@@ -168,12 +175,18 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
       playheadSamples: 0,
       rate: 1.0,
       bpm: 128,
+      beatPhaseOffset: 0,
     },
     currentZoom: 1.0,
     currentLODIndex: 0,
     viewWidth: canvas.width,
     viewHeight: canvas.height,
     dpr: window.devicePixelRatio ?? 1,
+    // LOD blending state
+    currentPrimaryLODIndex: 0,
+    currentSecondaryLODIndex: 0,
+    currentLODBlendFactor: 0,
+    currentBindGroup: null,
     pyramid: waveform,
   };
 
@@ -195,7 +208,29 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
       internals.currentZoom
     );
 
-    internals.currentLODIndex = selectLODIndex(internals.pyramid, targetSamplesPerPixel);
+    // Calculate LOD blending information for smooth transitions
+    const lodBlendInfo = calculateLODBlend(internals.pyramid, targetSamplesPerPixel);
+    internals.currentPrimaryLODIndex = lodBlendInfo.primaryIndex;
+    internals.currentSecondaryLODIndex = lodBlendInfo.secondaryIndex;
+    internals.currentLODBlendFactor = lodBlendInfo.blendFactor;
+    internals.currentLODIndex = lodBlendInfo.primaryIndex; // Keep for backwards compatibility
+
+    // Create new bind group with both LOD textures
+    const primaryResources = internals.lodResources[lodBlendInfo.primaryIndex];
+    const secondaryResources = internals.lodResources[lodBlendInfo.secondaryIndex];
+
+    if (primaryResources && secondaryResources) {
+      internals.currentBindGroup = createDualLODBindGroup(
+        internals.device,
+        internals.bindGroupLayout,
+        internals.uniformBuffer,
+        primaryResources.amplitudeTexture,
+        primaryResources.bandTexture,
+        secondaryResources.amplitudeTexture,
+        secondaryResources.bandTexture,
+        internals.sampler
+      );
+    }
   };
 
   const resize = (width: number, height: number, dpr: number): void => {
@@ -221,13 +256,37 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
       internals.currentZoom
     );
 
-    internals.currentLODIndex = selectLODIndex(internals.pyramid, targetSamplesPerPixel);
+    // Calculate LOD blending information for smooth transitions
+    const lodBlendInfo = calculateLODBlend(internals.pyramid, targetSamplesPerPixel);
+    internals.currentPrimaryLODIndex = lodBlendInfo.primaryIndex;
+    internals.currentSecondaryLODIndex = lodBlendInfo.secondaryIndex;
+    internals.currentLODBlendFactor = lodBlendInfo.blendFactor;
+    internals.currentLODIndex = lodBlendInfo.primaryIndex;
+
+    // Create new bind group with both LOD textures
+    const primaryResources = internals.lodResources[lodBlendInfo.primaryIndex];
+    const secondaryResources = internals.lodResources[lodBlendInfo.secondaryIndex];
+
+    if (primaryResources && secondaryResources) {
+      internals.currentBindGroup = createDualLODBindGroup(
+        internals.device,
+        internals.bindGroupLayout,
+        internals.uniformBuffer,
+        primaryResources.amplitudeTexture,
+        primaryResources.bandTexture,
+        secondaryResources.amplitudeTexture,
+        secondaryResources.bandTexture,
+        internals.sampler
+      );
+    }
   };
 
   const frame = (_dt: number, time: number): void => {
     // Select current LOD
-    const currentLOD = internals.pyramid.lods[internals.currentLODIndex];
-    if (!currentLOD) {
+    const primaryLOD = internals.pyramid.lods[internals.currentPrimaryLODIndex];
+    const secondaryLOD = internals.pyramid.lods[internals.currentSecondaryLODIndex];
+
+    if (!primaryLOD || !secondaryLOD) {
       return;
     }
 
@@ -236,7 +295,7 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
       internals.currentTransport.playheadSamples
     );
 
-    // Prepare uniforms
+    // Prepare uniforms with LOD blending information
     const uniformData: WaveUniformsData = {
       viewWidth: internals.canvas.width,
       viewHeight: internals.canvas.height,
@@ -245,13 +304,18 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
       sampleRate: internals.pyramid.bandConfig.sampleRate,
       rate: internals.currentTransport.rate,
       zoomLevel: internals.currentZoom,
-      samplesPerPixel: currentLOD.samplesPerPixel,
-      lodLengthInPixels: currentLOD.lengthInPixels,
+      samplesPerPixel: primaryLOD.samplesPerPixel,
+      lodLengthInPixels: primaryLOD.lengthInPixels,
       totalSamples: internals.pyramid.totalSamples,
       bandCount: internals.pyramid.bandConfig.bandCount,
       waveformCenterY: 0.5,     // Center of canvas vertically
       waveformMaxHeight: 0.4,   // Use 80% of canvas height total
       time,
+      // LOD blending parameters for smooth transitions
+      lodBlendFactor: internals.currentLODBlendFactor,
+      secondarySamplesPerPixel: secondaryLOD.samplesPerPixel,
+      secondaryLodLengthInPixels: secondaryLOD.lengthInPixels,
+      beatPhaseOffset: internals.currentTransport.beatPhaseOffset ?? 0,
     };
 
     writeUniforms(internals.device, internals.uniformBuffer, uniformData);
@@ -280,9 +344,15 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
     // Set pipeline and bind group
     renderPass.setPipeline(internals.pipeline);
 
-    const lodBindGroup = internals.lodResources[internals.currentLODIndex];
-    if (lodBindGroup) {
-      renderPass.setBindGroup(0, lodBindGroup.bindGroup);
+    // Use the current dual-LOD bind group for smooth LOD blending
+    if (internals.currentBindGroup) {
+      renderPass.setBindGroup(0, internals.currentBindGroup);
+    } else {
+      // Fallback to single LOD bind group
+      const lodBindGroup = internals.lodResources[internals.currentLODIndex];
+      if (lodBindGroup) {
+        renderPass.setBindGroup(0, lodBindGroup.bindGroup);
+      }
     }
 
     // Draw fullscreen triangle (3 vertices)
