@@ -95,6 +95,7 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     }
 
     // Create bind group layout
+    // Note: rg32float and rgba32float are unfilterable formats, so we must use 'unfilterable-float'
     const bindGroupLayout = device.createBindGroupLayout({
       label: 'Waveform Bind Group Layout',
       entries: [
@@ -106,17 +107,17 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
         {
           binding: 1,
           visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
+          texture: { sampleType: 'unfilterable-float' },
         },
         {
           binding: 2,
           visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
+          texture: { sampleType: 'unfilterable-float' },
         },
         {
           binding: 3,
           visibility: GPUShaderStage.FRAGMENT,
-          sampler: { type: 'filtering' },
+          sampler: { type: 'non-filtering' },
         },
       ],
     });
@@ -167,11 +168,11 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
 
-    // Create sampler
+    // Create sampler - non-filtering since we use textureLoad with unfilterable formats
     const sampler = device.createSampler({
       label: 'Waveform Sampler',
-      magFilter: 'linear',
-      minFilter: 'linear',
+      magFilter: 'nearest',
+      minFilter: 'nearest',
       addressModeU: 'clamp-to-edge',
       addressModeV: 'clamp-to-edge',
     });
@@ -283,6 +284,11 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       return;
     }
 
+    // CRITICAL: Wrap 1D data into 2D texture to avoid exceeding max texture width (8192)
+    const MAX_TEXTURE_WIDTH = 8192;
+    const textureWidth = Math.min(lod.lengthInPixels, MAX_TEXTURE_WIDTH);
+    const textureHeight = Math.ceil(lod.lengthInPixels / MAX_TEXTURE_WIDTH);
+
     console.log('[DeckWaveformComponent] Uploading waveform data', {
       lodIndex,
       lengthInPixels: lod.lengthInPixels,
@@ -291,16 +297,18 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       amplitudeLength: lod.amplitude.length,
       bandEnergiesLength: lod.bandEnergies.length,
       bandCount: pyramid.bands.bandCount,
+      textureWidth,
+      textureHeight,
     });
 
     // Destroy old textures
     this.resources.amplitudeTexture.destroy();
     this.resources.bandsTexture.destroy();
 
-    // Create new amplitude texture (RG32Float: min, max)
+    // Create new amplitude texture (RG32Float: min, max) - now 2D
     const amplitudeTexture = this.device.createTexture({
       label: 'Amplitude Texture',
-      size: [lod.lengthInPixels, 1],
+      size: [textureWidth, textureHeight],
       format: 'rg32float',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
@@ -314,9 +322,9 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       });
     }
 
-    // Upload amplitude data - use the Float32Array directly to ensure correct data layout
-    // Note: We need to pass the actual array data, not just the buffer (which may have offsets)
-    const amplitudeData = new Float32Array(lod.lengthInPixels * 2);
+    // Upload amplitude data - wrap into 2D texture
+    // Pad to full rows to match texture size
+    const amplitudeData = new Float32Array(textureWidth * textureHeight * 2);
     for (let i = 0; i < lod.lengthInPixels; i++) {
       amplitudeData[i * 2 + 0] = lod.amplitude[i * 2 + 0] ?? 0; // min
       amplitudeData[i * 2 + 1] = lod.amplitude[i * 2 + 1] ?? 0; // max
@@ -325,20 +333,20 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     this.device.queue.writeTexture(
       { texture: amplitudeTexture },
       amplitudeData,
-      { bytesPerRow: lod.lengthInPixels * 8 }, // 2 floats * 4 bytes
-      { width: lod.lengthInPixels, height: 1 }
+      { bytesPerRow: textureWidth * 8 }, // 2 floats * 4 bytes
+      { width: textureWidth, height: textureHeight }
     );
 
-    // Create bands texture (RGBA32Float: low, mid, high, unused)
+    // Create bands texture (RGBA32Float: low, mid, high, unused) - now 2D
     const bandsTexture = this.device.createTexture({
       label: 'Bands Texture',
-      size: [lod.lengthInPixels, 1],
+      size: [textureWidth, textureHeight],
       format: 'rgba32float',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
 
     // Convert band energies to RGBA format
-    const bandsRGBA = new Float32Array(lod.lengthInPixels * 4);
+    const bandsRGBA = new Float32Array(textureWidth * textureHeight * 4);
     const bandCount = pyramid.bands.bandCount;
 
     // Validate band data
@@ -361,8 +369,8 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     this.device.queue.writeTexture(
       { texture: bandsTexture },
       bandsRGBA,
-      { bytesPerRow: lod.lengthInPixels * 16 }, // 4 floats * 4 bytes
-      { width: lod.lengthInPixels, height: 1 }
+      { bytesPerRow: textureWidth * 16 }, // 4 floats * 4 bytes
+      { width: textureWidth, height: textureHeight }
     );
 
     // Recreate bind group with new textures

@@ -70,7 +70,7 @@ struct BandColors {
 // 3u = Show LOD texture coordinate as color gradient
 const DEBUG_MODE: u32 = 0u;
 
-@group(0) @binding(0) var<uniform> shared: SharedUniforms;
+@group(0) @binding(0) var<uniform> sharedUniforms: SharedUniforms;
 @group(1) @binding(0) var<uniform> waveform: WaveformUniforms;
 @group(1) @binding(1) var amplitudeTex: texture_2d<f32>;
 @group(1) @binding(2) var bandsTex: texture_2d<f32>;
@@ -133,13 +133,20 @@ fn sampleToLODCoord(samplePos: f32) -> f32 {
 }
 
 // Sample amplitude from texture (returns min, max)
+// Note: Using textureLoad since unfilterable-float textures don't support filtering
+// The 1D waveform data is wrapped into a 2D texture (max width 8192)
 fn sampleAmplitude(lodCoord: f32) -> vec2<f32> {
   if (lodCoord < 0.0 || lodCoord > 1.0) {
     return vec2<f32>(0.0, 0.0);
   }
-  // Texture is 1D (height=1), so Y coordinate should be 0.5 (center of single row)
-  let texCoord = vec2<f32>(lodCoord, 0.5);
-  let sample = textureSample(amplitudeTex, texSampler, texCoord);
+  let texSize = textureDimensions(amplitudeTex);
+  let totalPixels = texSize.x * texSize.y;
+  let linearIndex = u32(lodCoord * f32(totalPixels - 1u));
+  let clampedIndex = min(linearIndex, totalPixels - 1u);
+  // Unwrap linear index to 2D coordinates
+  let texX = clampedIndex % texSize.x;
+  let texY = clampedIndex / texSize.x;
+  let sample = textureLoad(amplitudeTex, vec2<u32>(texX, texY), 0);
   return vec2<f32>(sample.r, sample.g); // min, max
 }
 
@@ -148,9 +155,14 @@ fn sampleBands(lodCoord: f32) -> vec3<f32> {
   if (lodCoord < 0.0 || lodCoord > 1.0) {
     return vec3<f32>(0.33, 0.33, 0.34); // Return balanced bands for out-of-bounds
   }
-  // Texture is 1D (height=1), so Y coordinate should be 0.5 (center of single row)
-  let texCoord = vec2<f32>(lodCoord, 0.5);
-  let sample = textureSample(bandsTex, texSampler, texCoord);
+  let texSize = textureDimensions(bandsTex);
+  let totalPixels = texSize.x * texSize.y;
+  let linearIndex = u32(lodCoord * f32(totalPixels - 1u));
+  let clampedIndex = min(linearIndex, totalPixels - 1u);
+  // Unwrap linear index to 2D coordinates
+  let texX = clampedIndex % texSize.x;
+  let texY = clampedIndex / texSize.x;
+  let sample = textureLoad(bandsTex, vec2<u32>(texX, texY), 0);
   return vec3<f32>(sample.r, sample.g, sample.b);
 }
 
