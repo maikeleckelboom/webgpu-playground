@@ -223,6 +223,17 @@ export function createUniformBuffer(device: GPUDevice): GPUBuffer {
 }
 
 /**
+ * Split a large sample count into high/low float components for precision.
+ * Uses 2^16 as the split factor to maintain good precision in both components.
+ */
+export function splitPlayheadSamples(samples: number): { high: number; low: number } {
+  const splitFactor = 65536; // 2^16
+  const high = Math.floor(samples / splitFactor);
+  const low = samples - high * splitFactor;
+  return { high, low };
+}
+
+/**
  * Write uniform data to the GPU buffer.
  * Layout must match the WGSL WaveUniforms struct exactly.
  */
@@ -238,31 +249,35 @@ export function writeUniforms(
   // Layout (must match WGSL struct with proper alignment):
   // offset 0:  viewWidth (f32)
   // offset 4:  viewHeight (f32)
-  // offset 8:  playheadSamples (f32)
-  // offset 12: sampleRate (f32)
-  // offset 16: rate (f32)
-  // offset 20: zoomLevel (f32)
-  // offset 24: samplesPerPixel (f32)
-  // offset 28: lodLengthInPixels (f32)
-  // offset 32: bandCount (u32)
-  // offset 36: waveformCenterY (f32)
-  // offset 40: waveformMaxHeight (f32)
-  // offset 44: time (f32)
-  // offset 48-63: padding (to align to 16 bytes)
+  // offset 8:  playheadSamplesHigh (f32)
+  // offset 12: playheadSamplesLow (f32)
+  // offset 16: sampleRate (f32)
+  // offset 20: rate (f32)
+  // offset 24: zoomLevel (f32)
+  // offset 28: samplesPerPixel (f32)
+  // offset 32: lodLengthInPixels (f32)
+  // offset 36: totalSamples (f32)
+  // offset 40: bandCount (u32)
+  // offset 44: waveformCenterY (f32)
+  // offset 48: waveformMaxHeight (f32)
+  // offset 52: time (f32)
+  // offset 56-63: padding (to align to 16 bytes)
 
   floatView[0] = data.viewWidth;
   floatView[1] = data.viewHeight;
-  floatView[2] = data.playheadSamples;
-  floatView[3] = data.sampleRate;
-  floatView[4] = data.rate;
-  floatView[5] = data.zoomLevel;
-  floatView[6] = data.samplesPerPixel;
-  floatView[7] = data.lodLengthInPixels;
-  uintView[8] = data.bandCount;
-  floatView[9] = data.waveformCenterY;
-  floatView[10] = data.waveformMaxHeight;
-  floatView[11] = data.time;
-  // Remaining slots are padding
+  floatView[2] = data.playheadSamplesHigh;
+  floatView[3] = data.playheadSamplesLow;
+  floatView[4] = data.sampleRate;
+  floatView[5] = data.rate;
+  floatView[6] = data.zoomLevel;
+  floatView[7] = data.samplesPerPixel;
+  floatView[8] = data.lodLengthInPixels;
+  floatView[9] = data.totalSamples;
+  uintView[10] = data.bandCount;
+  floatView[11] = data.waveformCenterY;
+  floatView[12] = data.waveformMaxHeight;
+  floatView[13] = data.time;
+  // Remaining slots (14, 15) are padding for 16-byte alignment
 
   device.queue.writeBuffer(buffer, 0, arrayBuffer);
 }

@@ -19,6 +19,7 @@ import {
   destroyLODResources,
   selectLODIndex,
   calculateSamplesPerPixel,
+  splitPlayheadSamples,
 } from './gpu-resources.ts';
 
 import shaderCode from '../shaders/deck-waveform-standalone.wgsl?raw';
@@ -230,16 +231,23 @@ export function createDeckWaveform(opts: DeckWaveformOptions): DeckWaveform {
       return;
     }
 
+    // Split playhead into high/low for precision
+    const { high: playheadHigh, low: playheadLow } = splitPlayheadSamples(
+      internals.currentTransport.playheadSamples
+    );
+
     // Prepare uniforms
     const uniformData: WaveUniformsData = {
       viewWidth: internals.canvas.width,
       viewHeight: internals.canvas.height,
-      playheadSamples: internals.currentTransport.playheadSamples,
+      playheadSamplesHigh: playheadHigh,
+      playheadSamplesLow: playheadLow,
       sampleRate: internals.pyramid.bandConfig.sampleRate,
       rate: internals.currentTransport.rate,
       zoomLevel: internals.currentZoom,
       samplesPerPixel: currentLOD.samplesPerPixel,
       lodLengthInPixels: currentLOD.lengthInPixels,
+      totalSamples: internals.pyramid.totalSamples,
       bandCount: internals.pyramid.bandConfig.bandCount,
       waveformCenterY: 0.5,     // Center of canvas vertically
       waveformMaxHeight: 0.4,   // Use 80% of canvas height total
