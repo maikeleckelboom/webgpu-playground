@@ -19,15 +19,13 @@
     "test:e2e:headed": "playwright test --headed",
     "test:all": "npm run lint && npm run typecheck && npm run test:run && npm run test:e2e"
   },
-  "dependencies": {
-    "@webgpu/types": "^0.1.40"
-  },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "@vitest/coverage-v8": "^4.0.9",
     "@vitest/ui": "^4.0.9",
+    "@webgpu/types": "^0.1.66",
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^9.1.2",
     "eslint-import-resolver-typescript": "^4.4.4",
