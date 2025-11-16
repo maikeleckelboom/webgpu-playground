@@ -10,6 +10,7 @@ import {
   createTestDeckState,
   createTestAudioVisualState,
   updateTransportPlayback,
+  buildWaveformPyramidFromPCM,
 } from './utils/test-data.ts';
 import type { DeckState, AudioVisualState } from './types/audio-state.ts';
 
@@ -377,6 +378,134 @@ class DJVisualizationApp {
 
       this.updateInfoDisplay();
     });
+
+    // File upload handler
+    const trackUpload = document.getElementById('track-upload') as HTMLInputElement | null;
+    if (trackUpload) {
+      trackUpload.addEventListener('change', () => {
+        this.handleTrackUpload(trackUpload.files);
+      });
+    }
+  }
+
+  private async handleTrackUpload(files: FileList | null): Promise<void> {
+    if (!files || files.length === 0) {return;}
+
+    const file = files[0];
+    console.log('[DJVisualizationApp] Loading track:', file.name);
+
+    try {
+      // Update track info display
+      const titleEl = document.getElementById('track-title');
+      const artistEl = document.getElementById('track-artist');
+      if (titleEl) {
+        titleEl.textContent = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
+      }
+      if (artistEl) {
+        artistEl.textContent = 'Loading...';
+      }
+
+      // Read file as ArrayBuffer
+      const arrayBuffer = await file.arrayBuffer();
+
+      // Decode audio using Web Audio API
+      const audioContext = new AudioContext();
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+      console.log('[DJVisualizationApp] Audio decoded:', {
+        duration: audioBuffer.duration,
+        sampleRate: audioBuffer.sampleRate,
+        numberOfChannels: audioBuffer.numberOfChannels,
+        length: audioBuffer.length,
+      });
+
+      // Convert to mono Float32Array
+      const monoData = this.extractMonoChannel(audioBuffer);
+
+      // Build waveform pyramid from PCM data
+      const newWaveform = buildWaveformPyramidFromPCM(monoData, audioBuffer.sampleRate);
+
+      console.log('[DJVisualizationApp] Waveform pyramid built:', {
+        totalSamples: newWaveform.totalSamples,
+        lodCount: newWaveform.lods.length,
+        firstLodLength: newWaveform.lods[0]?.lengthInPixels,
+      });
+
+      // Update deck state with new waveform
+      this.deckState = {
+        ...this.deckState,
+        waveform: newWaveform,
+        trackTitle: file.name.replace(/\.[^/.]+$/, ''),
+        trackArtist: 'User Uploaded',
+        trackDurationSamples: newWaveform.totalSamples,
+        transport: {
+          ...this.deckState.transport,
+          playheadSamples: 0,
+          barIndex: 0,
+          beatInBar: 0,
+          beatPhase: 0,
+        },
+      };
+
+      // Mark waveform as dirty so component re-uploads
+      if (this.waveformComponent) {
+        this.waveformComponent.markWaveformDirty();
+      }
+
+      // Update audio state
+      this.audioState = {
+        ...this.audioState,
+        decks: [this.deckState],
+      };
+
+      // Update display
+      if (artistEl) {
+        artistEl.textContent = 'User Uploaded';
+      }
+      this.updateInfoDisplay();
+
+      // Clean up
+      await audioContext.close();
+
+      console.log('[DJVisualizationApp] Track loaded successfully');
+    } catch (error) {
+      console.error('[DJVisualizationApp] Failed to load track:', error);
+
+      const artistEl = document.getElementById('track-artist');
+      if (artistEl) {
+        artistEl.textContent = 'Load failed';
+      }
+
+      alert(`Failed to load audio file: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private extractMonoChannel(audioBuffer: AudioBuffer): Float32Array {
+    const length = audioBuffer.length;
+    const monoData = new Float32Array(length);
+
+    if (audioBuffer.numberOfChannels === 1) {
+      // Already mono
+      audioBuffer.copyFromChannel(monoData, 0);
+    } else {
+      // Mix down to mono (average of all channels)
+      const numChannels = audioBuffer.numberOfChannels;
+      const channelData: Float32Array[] = [];
+
+      for (let i = 0; i < numChannels; i++) {
+        channelData.push(audioBuffer.getChannelData(i));
+      }
+
+      for (let i = 0; i < length; i++) {
+        let sum = 0;
+        for (let ch = 0; ch < numChannels; ch++) {
+          sum += channelData[ch][i];
+        }
+        monoData[i] = sum / numChannels;
+      }
+    }
+
+    return monoData;
   }
 
   private setupKeyboardShortcuts(): void {

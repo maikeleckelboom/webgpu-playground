@@ -332,3 +332,136 @@ export function updateTransportPlayback(
     transport: newTransport,
   };
 }
+
+/**
+ * Build a WaveformPyramid from raw PCM audio data
+ * This is a placeholder band model - can be swapped for real FFT-based analyzer later
+ *
+ * @param pcmData - Mono audio samples (Float32Array, values in [-1, 1])
+ * @param sampleRate - Sample rate of the audio
+ * @returns WaveformPyramid with multiple LODs
+ */
+export function buildWaveformPyramidFromPCM(
+  pcmData: Float32Array,
+  sampleRate: number
+): WaveformPyramid {
+  const totalSamples = pcmData.length;
+
+  const bandConfig: WaveformBandConfig = {
+    bandCount: 3,
+    sampleRate,
+    frequencyRanges: [
+      { min: 20, max: 250 }, // Low
+      { min: 250, max: 4000 }, // Mid
+      { min: 4000, max: 20000 }, // High
+    ],
+  };
+
+  // Generate multiple LODs (same as generateTestWaveform)
+  const lods: WaveformLOD[] = [];
+  const lodSamplesPerPixel = [64, 128, 256, 512, 1024, 2048, 4096];
+
+  for (const samplesPerPixel of lodSamplesPerPixel) {
+    const lengthInPixels = Math.ceil(totalSamples / samplesPerPixel);
+
+    // Generate amplitude envelope (min/max pairs)
+    const amplitude = new Float32Array(lengthInPixels * 2);
+
+    // Generate band energies (interleaved: low, mid, high for each pixel)
+    const bandEnergies = new Float32Array(lengthInPixels * 3);
+
+    for (let i = 0; i < lengthInPixels; i++) {
+      const startSample = i * samplesPerPixel;
+      const endSample = Math.min(startSample + samplesPerPixel, totalSamples);
+
+      // Calculate min/max amplitude for this block
+      let minVal = 0;
+      let maxVal = 0;
+      let sumSquares = 0;
+      let sampleCount = 0;
+
+      for (let j = startSample; j < endSample; j++) {
+        const sample = pcmData[j];
+        if (sample < minVal) minVal = sample;
+        if (sample > maxVal) maxVal = sample;
+        sumSquares += sample * sample;
+        sampleCount++;
+      }
+
+      // Store as positive extents from center (0)
+      // minVal is negative, maxVal is positive
+      // We store the absolute extent in both directions
+      amplitude[i * 2 + 0] = Math.abs(minVal); // min extent (stored positive)
+      amplitude[i * 2 + 1] = maxVal; // max extent
+
+      // Calculate RMS for this block
+      const rms = sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0;
+
+      // Fake band split using simple heuristics (placeholder for real FFT)
+      // This uses the RMS and some signal characteristics to estimate bands
+      // In a real implementation, you'd use FFT to analyze frequency content
+
+      // Simple heuristic: use RMS and zero-crossing rate
+      let zeroCrossings = 0;
+      let highPassEnergy = 0;
+      let lowPassEnergy = 0;
+
+      for (let j = startSample + 1; j < endSample; j++) {
+        const curr = pcmData[j];
+        const prev = pcmData[j - 1];
+
+        // Count zero crossings (approximates high frequency content)
+        if ((curr >= 0 && prev < 0) || (curr < 0 && prev >= 0)) {
+          zeroCrossings++;
+        }
+
+        // Simple first-order high-pass approximation
+        const highPass = curr - prev;
+        highPassEnergy += highPass * highPass;
+
+        // Use low sample values for low frequency approximation
+        lowPassEnergy += Math.abs(curr) * Math.abs(curr);
+      }
+
+      const blockSize = endSample - startSample;
+      const zeroCrossingRate = blockSize > 0 ? zeroCrossings / blockSize : 0;
+
+      // Normalize energies to [0, 1] range
+      const totalEnergy = rms + 0.001; // Avoid division by zero
+
+      // Estimate band distribution based on zero-crossing rate
+      // High zero-crossing rate = more high frequency content
+      let lowEnergy = rms * (1.0 - zeroCrossingRate * 2);
+      let midEnergy = rms * 0.5;
+      let highEnergy = rms * zeroCrossingRate * 3;
+
+      // Add some variation based on amplitude envelope shape
+      const peakiness = (maxVal - Math.abs(minVal)) / (maxVal + Math.abs(minVal) + 0.001);
+      lowEnergy += Math.abs(peakiness) * rms * 0.3;
+
+      // Clamp and normalize
+      lowEnergy = Math.max(0, Math.min(1, lowEnergy / totalEnergy));
+      midEnergy = Math.max(0, Math.min(1, midEnergy / totalEnergy));
+      highEnergy = Math.max(0, Math.min(1, highEnergy / totalEnergy));
+
+      // Store band energies
+      bandEnergies[i * 3 + 0] = lowEnergy;
+      bandEnergies[i * 3 + 1] = midEnergy;
+      bandEnergies[i * 3 + 2] = highEnergy;
+    }
+
+    lods.push({
+      samplesPerPixel,
+      lengthInPixels,
+      amplitude,
+      bandEnergies,
+    });
+  }
+
+  return {
+    totalSamples,
+    sampleRate,
+    lods,
+    bands: bandConfig,
+  };
+}

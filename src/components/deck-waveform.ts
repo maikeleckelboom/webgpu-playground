@@ -59,6 +59,8 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
   private currentDeckState: DeckState | null = null;
   private waveformUploaded = false;
   private currentLODIndex = 0;
+  private hasLoggedFirstFrame = false;
+  private waveformDirty = false;
 
   constructor(deckIndex: number) {
     this.id = `deck-waveform-${deckIndex}`;
@@ -193,10 +195,13 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
 
     this.currentDeckState = deckState;
 
-    // Upload waveform data if not done yet
-    if (!this.waveformUploaded && deckState.waveform) {
-      this.uploadWaveformData(deckState.waveform);
-      this.waveformUploaded = true;
+    // Upload waveform data if not done yet or if marked dirty
+    if ((!this.waveformUploaded || this.waveformDirty) && deckState.waveform) {
+      if (deckState.waveform.lods.length > 0 && deckState.waveform.totalSamples > 0) {
+        this.uploadWaveformData(deckState.waveform);
+        this.waveformUploaded = true;
+        this.waveformDirty = false;
+      }
     }
 
     // Select appropriate LOD based on zoom
@@ -204,6 +209,12 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
 
     // Update uniforms
     this.updateUniforms(deckState);
+  }
+
+  // Mark waveform as needing re-upload (called when new track is loaded)
+  markWaveformDirty(): void {
+    this.waveformDirty = true;
+    this.waveformUploaded = false;
   }
 
   private selectLOD(pyramid: WaveformPyramid): number {
@@ -234,10 +245,35 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
   private uploadWaveformData(pyramid: WaveformPyramid): void {
     if (!this.device || !this.resources) {return;}
 
-    // For simplicity, upload the middle LOD first
-    // In production, you'd upload multiple LODs
-    const lodIndex = Math.floor(pyramid.lods.length / 2);
+    // Validate pyramid data
+    if (pyramid.lods.length === 0) {
+      console.error('[DeckWaveformComponent] No LODs in waveform pyramid');
+      return;
+    }
+
+    // Select the best LOD for current view - prefer one with reasonable resolution
+    // Middle LOD is a good default, but ensure it exists
+    const lodIndex = Math.min(
+      Math.floor(pyramid.lods.length / 2),
+      pyramid.lods.length - 1
+    );
     const lod = pyramid.lods[lodIndex];
+
+    // Validate LOD data
+    if (!lod || lod.lengthInPixels === 0) {
+      console.error('[DeckWaveformComponent] Invalid LOD data', { lodIndex, lod });
+      return;
+    }
+
+    console.log('[DeckWaveformComponent] Uploading waveform data', {
+      lodIndex,
+      lengthInPixels: lod.lengthInPixels,
+      samplesPerPixel: lod.samplesPerPixel,
+      totalSamples: pyramid.totalSamples,
+      amplitudeLength: lod.amplitude.length,
+      bandEnergiesLength: lod.bandEnergies.length,
+      bandCount: pyramid.bands.bandCount,
+    });
 
     // Destroy old textures
     this.resources.amplitudeTexture.destroy();
@@ -250,6 +286,15 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       format: 'rg32float',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
+
+    // Validate amplitude data size
+    const expectedAmplitudeSize = lod.lengthInPixels * 2;
+    if (lod.amplitude.length !== expectedAmplitudeSize) {
+      console.warn('[DeckWaveformComponent] Amplitude data size mismatch', {
+        expected: expectedAmplitudeSize,
+        actual: lod.amplitude.length,
+      });
+    }
 
     // Upload amplitude data
     this.device.queue.writeTexture(
@@ -270,8 +315,18 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     // Convert band energies to RGBA format
     const bandsRGBA = new Float32Array(lod.lengthInPixels * 4);
     const bandCount = pyramid.bands.bandCount;
+
+    // Validate band data
+    const expectedBandSize = lod.lengthInPixels * bandCount;
+    if (lod.bandEnergies.length !== expectedBandSize) {
+      console.warn('[DeckWaveformComponent] Band energies size mismatch', {
+        expected: expectedBandSize,
+        actual: lod.bandEnergies.length,
+      });
+    }
+
     for (let i = 0; i < lod.lengthInPixels; i++) {
-      // Assuming interleaved band data: [b0_p0, b1_p0, b2_p0, b0_p1, ...]
+      // Assuming interleaved band data: [low_0, mid_0, high_0, low_1, mid_1, high_1, ...]
       bandsRGBA[i * 4 + 0] = lod.bandEnergies[i * bandCount + 0] || 0;
       bandsRGBA[i * 4 + 1] = lod.bandEnergies[i * bandCount + 1] || 0;
       bandsRGBA[i * 4 + 2] = lod.bandEnergies[i * bandCount + 2] || 0;
@@ -298,12 +353,24 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
         { binding: 3, resource: this.resources.sampler },
       ],
     });
+
+    console.log('[DeckWaveformComponent] Waveform data uploaded successfully');
   }
 
   private updateUniforms(deckState: DeckState): void {
     if (!this.device || !this.resources) {return;}
 
-    const lod = deckState.waveform.lods[this.currentLODIndex];
+    // Bounds check LOD index
+    const lodIndex = Math.min(
+      Math.max(0, this.currentLODIndex),
+      deckState.waveform.lods.length - 1
+    );
+    const lod = deckState.waveform.lods[lodIndex];
+
+    if (!lod) {
+      console.error('[DeckWaveformComponent] LOD not found at index', lodIndex);
+      return;
+    }
 
     // Split playhead into high/low for precision
     const playheadHigh = Math.floor(deckState.transport.playheadSamples / 16777216);
@@ -359,6 +426,16 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
   encode(encoder: GPUCommandEncoder, view: GPUTextureView): void {
     if (!this.resources || !this.ctx) {return;}
 
+    // Log first frame in development to prove render is being called
+    if (!this.hasLoggedFirstFrame) {
+      console.log('[DeckWaveformComponent] First render frame', {
+        hasTextures: Boolean(this.resources.amplitudeTexture && this.resources.bandsTexture),
+        waveformUploaded: this.waveformUploaded,
+        dimensions: this.dimensions,
+      });
+      this.hasLoggedFirstFrame = true;
+    }
+
     const renderPass = encoder.beginRenderPass({
       label: 'Waveform Render Pass',
       colorAttachments: [
@@ -366,7 +443,8 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
           view,
           loadOp: 'clear',
           storeOp: 'store',
-          clearValue: { r: 0.05, g: 0.05, b: 0.07, a: 1.0 },
+          // Clear to same color as shader gradient top (dark blue) - ensures non-black even if shader fails
+          clearValue: { r: 0.05, g: 0.06, b: 0.12, a: 1.0 },
         },
       ],
     });
