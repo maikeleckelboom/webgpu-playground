@@ -144,14 +144,14 @@ class DJVisualizationApp {
       this.setupEventHandlers();
       this.setupKeyboardShortcuts();
 
-      // Handle resize
+      // Show main UI first so canvas has proper dimensions
+      this.showMainUI();
+
+      // Handle resize after UI is visible
       this.handleResize();
       window.addEventListener('resize', () => {
         this.handleResize();
       });
-
-      // Show main UI
-      this.showMainUI();
 
       // Start render loop
       this.lastTime = performance.now() / 1000;
@@ -462,6 +462,13 @@ class DJVisualizationApp {
       if (artistEl) {
         artistEl.textContent = 'User Uploaded';
       }
+
+      // Reset info panel styling (in case of previous error)
+      const infoEl = document.getElementById('info-a');
+      if (infoEl) {
+        infoEl.style.color = '';
+      }
+
       this.updateInfoDisplay();
 
       // Clean up
@@ -473,7 +480,19 @@ class DJVisualizationApp {
 
       const artistEl = document.getElementById('track-artist');
       if (artistEl) {
-        artistEl.textContent = 'Load failed';
+        artistEl.textContent = 'Load failed - check console';
+      }
+
+      const titleEl = document.getElementById('track-title');
+      if (titleEl) {
+        titleEl.textContent = 'Decoding Error';
+      }
+
+      // Show error in the info panel as well
+      const infoEl = document.getElementById('info-a');
+      if (infoEl) {
+        infoEl.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        infoEl.style.color = 'var(--error)';
       }
 
       alert(`Failed to load audio file: ${error instanceof Error ? error.message : String(error)}`);

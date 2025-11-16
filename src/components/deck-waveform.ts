@@ -61,6 +61,7 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
   private currentLODIndex = 0;
   private hasLoggedFirstFrame = false;
   private waveformDirty = false;
+  private maxTextureSize = 8192; // WebGPU limit
 
   constructor(deckIndex: number) {
     this.id = `deck-waveform-${deckIndex}`;
@@ -70,6 +71,10 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
   async initialize(device: GPUDevice, ctx: VisualContext): Promise<void> {
     this.device = device;
     this.ctx = ctx;
+
+    // Get actual device texture size limit
+    this.maxTextureSize = device.limits.maxTextureDimension2D || 8192;
+    console.log(`[DeckWaveformComponent] Max texture size: ${this.maxTextureSize}`);
 
     // Create shader module
     const shaderModule = device.createShaderModule({
@@ -89,17 +94,17 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
         {
           binding: 1,
           visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
+          texture: { sampleType: 'unfilterable-float' },
         },
         {
           binding: 2,
           visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
+          texture: { sampleType: 'unfilterable-float' },
         },
         {
           binding: 3,
           visibility: GPUShaderStage.FRAGMENT,
-          sampler: { type: 'filtering' },
+          sampler: { type: 'non-filtering' },
         },
       ],
     });
@@ -150,11 +155,11 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
 
-    // Create sampler
+    // Create sampler (non-filtering for unfilterable-float textures)
     const sampler = device.createSampler({
       label: 'Waveform Sampler',
-      magFilter: 'linear',
-      minFilter: 'linear',
+      magFilter: 'nearest',
+      minFilter: 'nearest',
       addressModeU: 'clamp-to-edge',
       addressModeV: 'clamp-to-edge',
     });
@@ -195,17 +200,19 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
 
     this.currentDeckState = deckState;
 
-    // Upload waveform data if not done yet or if marked dirty
-    if ((!this.waveformUploaded || this.waveformDirty) && deckState.waveform) {
+    // Select appropriate LOD based on zoom FIRST
+    const newLODIndex = this.selectLOD(deckState.waveform);
+    const lodChanged = newLODIndex !== this.currentLODIndex;
+    this.currentLODIndex = newLODIndex;
+
+    // Upload waveform data if not done yet, marked dirty, or LOD changed
+    if ((!this.waveformUploaded || this.waveformDirty || lodChanged) && deckState.waveform) {
       if (deckState.waveform.lods.length > 0 && deckState.waveform.totalSamples > 0) {
         this.uploadWaveformData(deckState.waveform);
         this.waveformUploaded = true;
         this.waveformDirty = false;
       }
     }
-
-    // Select appropriate LOD based on zoom
-    this.currentLODIndex = this.selectLOD(deckState.waveform);
 
     // Update uniforms
     this.updateUniforms(deckState);
@@ -221,16 +228,27 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     // Calculate desired samples per pixel based on zoom
     const desiredSamplesPerPixel = this.getBaseSamplesPerPixel() / this.zoom;
 
-    // Find the LOD with the closest samples per pixel
-    let bestIndex = 0;
-    let bestDiff = Math.abs(pyramid.lods[0].samplesPerPixel - desiredSamplesPerPixel);
+    // Find the LOD with the closest samples per pixel that fits within texture limits
+    let bestIndex = -1;
+    let bestDiff = Infinity;
 
-    for (let i = 1; i < pyramid.lods.length; i++) {
-      const diff = Math.abs(pyramid.lods[i].samplesPerPixel - desiredSamplesPerPixel);
+    for (let i = 0; i < pyramid.lods.length; i++) {
+      const lod = pyramid.lods[i];
+      // Skip LODs that exceed texture size limit
+      if (lod.lengthInPixels > this.maxTextureSize) {
+        continue;
+      }
+      const diff = Math.abs(lod.samplesPerPixel - desiredSamplesPerPixel);
       if (diff < bestDiff) {
         bestDiff = diff;
         bestIndex = i;
       }
+    }
+
+    // If no LOD fits, fall back to the highest LOD (lowest resolution)
+    if (bestIndex === -1) {
+      console.warn(`[DeckWaveformComponent] No LOD fits within texture limit ${this.maxTextureSize}, using highest LOD`);
+      bestIndex = pyramid.lods.length - 1;
     }
 
     return bestIndex;
@@ -251,10 +269,9 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       return;
     }
 
-    // Select the best LOD for current view - prefer one with reasonable resolution
-    // Middle LOD is a good default, but ensure it exists
+    // Use the currently selected LOD index (based on zoom level)
     const lodIndex = Math.min(
-      Math.floor(pyramid.lods.length / 2),
+      Math.max(0, this.currentLODIndex),
       pyramid.lods.length - 1
     );
     const lod = pyramid.lods[lodIndex];
@@ -262,6 +279,15 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     // Validate LOD data
     if (!lod || lod.lengthInPixels === 0) {
       console.error('[DeckWaveformComponent] Invalid LOD data', { lodIndex, lod });
+      return;
+    }
+
+    // Check texture size limit
+    if (lod.lengthInPixels > this.maxTextureSize) {
+      console.error(`[DeckWaveformComponent] LOD ${lodIndex} exceeds texture size limit`, {
+        lengthInPixels: lod.lengthInPixels,
+        maxTextureSize: this.maxTextureSize,
+      });
       return;
     }
 
@@ -273,6 +299,7 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       amplitudeLength: lod.amplitude.length,
       bandEnergiesLength: lod.bandEnergies.length,
       bandCount: pyramid.bands.bandCount,
+      maxTextureSize: this.maxTextureSize,
     });
 
     // Destroy old textures
@@ -296,10 +323,17 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       });
     }
 
-    // Upload amplitude data
+    // Upload amplitude data - use the Float32Array directly to ensure correct data layout
+    // Note: We need to pass the actual array data, not just the buffer (which may have offsets)
+    const amplitudeData = new Float32Array(lod.lengthInPixels * 2);
+    for (let i = 0; i < lod.lengthInPixels; i++) {
+      amplitudeData[i * 2 + 0] = lod.amplitude[i * 2 + 0] ?? 0; // min
+      amplitudeData[i * 2 + 1] = lod.amplitude[i * 2 + 1] ?? 0; // max
+    }
+
     this.device.queue.writeTexture(
       { texture: amplitudeTexture },
-      lod.amplitude.buffer as ArrayBuffer,
+      amplitudeData,
       { bytesPerRow: lod.lengthInPixels * 8 }, // 2 floats * 4 bytes
       { width: lod.lengthInPixels, height: 1 }
     );
@@ -420,11 +454,32 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       0, // padding
     ]);
 
+    // Log uniform values once after waveform upload for debugging
+    if (this.waveformUploaded && !this.hasLoggedFirstFrame) {
+      console.log('[DeckWaveformComponent] Uniform values being set:', {
+        playheadSamples: deckState.transport.playheadSamples,
+        playheadHigh,
+        playheadLow,
+        sampleRate: deckState.waveform.sampleRate,
+        totalSamples: deckState.waveform.totalSamples,
+        viewWidth: this.dimensions.physicalWidth,
+        viewHeight: this.dimensions.physicalHeight,
+        samplesPerPixel: this.getBaseSamplesPerPixel() / this.zoom,
+        lodIndex: this.currentLODIndex,
+        lodSamplesPerPixel: lod.samplesPerPixel,
+        lodLengthInPixels: lod.lengthInPixels,
+        bandCount: deckState.waveform.bands.bandCount,
+      });
+    }
+
     this.device.queue.writeBuffer(this.resources.uniformBuffer, 0, uniformData);
   }
 
   encode(encoder: GPUCommandEncoder, view: GPUTextureView): void {
-    if (!this.resources || !this.ctx) {return;}
+    if (!this.resources || !this.ctx) {
+      console.warn('[DeckWaveformComponent] encode() skipped: resources or ctx is null');
+      return;
+    }
 
     // Log first frame in development to prove render is being called
     if (!this.hasLoggedFirstFrame) {
@@ -432,6 +487,8 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
         hasTextures: Boolean(this.resources.amplitudeTexture && this.resources.bandsTexture),
         waveformUploaded: this.waveformUploaded,
         dimensions: this.dimensions,
+        hasSharedBindGroup: Boolean(this.ctx.sharedBindGroup),
+        hasWaveformBindGroup: Boolean(this.resources.bindGroup),
       });
       this.hasLoggedFirstFrame = true;
     }

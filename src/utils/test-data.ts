@@ -40,10 +40,14 @@ export function generateTestWaveform(config: TestTrackConfig): WaveformPyramid {
 
   // Generate multiple LODs
   const lods: WaveformLOD[] = [];
-  const lodSamplesPerPixel = [64, 128, 256, 512, 1024, 2048, 4096];
+  // Extended LOD levels to ensure at least one fits within 8192 pixel limit
+  // For 240s @ 44.1kHz (10.5M samples), we need at least 1292 spp for 8192 pixels
+  const lodSamplesPerPixel = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 
   for (const samplesPerPixel of lodSamplesPerPixel) {
     const lengthInPixels = Math.ceil(totalSamples / samplesPerPixel);
+    // Skip LODs that would create very small textures (less useful)
+    if (lengthInPixels < 16) {continue;}
 
     // Generate amplitude envelope (min/max pairs)
     const amplitude = new Float32Array(lengthInPixels * 2);
@@ -359,10 +363,13 @@ export function buildWaveformPyramidFromPCM(
 
   // Generate multiple LODs (same as generateTestWaveform)
   const lods: WaveformLOD[] = [];
-  const lodSamplesPerPixel = [64, 128, 256, 512, 1024, 2048, 4096];
+  // Extended LOD levels to ensure at least one fits within 8192 pixel limit
+  const lodSamplesPerPixel = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 
   for (const samplesPerPixel of lodSamplesPerPixel) {
     const lengthInPixels = Math.ceil(totalSamples / samplesPerPixel);
+    // Skip LODs that would create very small textures (less useful)
+    if (lengthInPixels < 16) {continue;}
 
     // Generate amplitude envelope (min/max pairs)
     const amplitude = new Float32Array(lengthInPixels * 2);
