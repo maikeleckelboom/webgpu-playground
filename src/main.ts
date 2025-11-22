@@ -13,6 +13,7 @@ import {
   buildWaveformPyramidFromPCM,
 } from './utils/test-data.ts';
 import type { DeckState, AudioVisualState } from './types/audio-state.ts';
+import { debugCanvasPixels } from './utils/debug-readback.ts';
 
 interface GPUInfo {
   adapter: GPUAdapterInfo;
@@ -43,6 +44,9 @@ class DJVisualizationApp {
 
   // GPU Info
   private gpuInfo: GPUInfo | null = null;
+
+  // Debug tracking
+  private hasRunFirstFrameDebug = false;
 
   constructor() {
     // Get canvas elements
@@ -545,8 +549,47 @@ class DJVisualizationApp {
         case 'r':
           this.resetPlayhead();
           break;
+        case 'd':
+          // Debug: Read back pixels from GPU
+          void this.debugReadbackPixels();
+          break;
       }
     });
+  }
+
+  private async debugReadbackPixels(): Promise<void> {
+    if (!this.runtime) {
+      console.warn('[Debug] Cannot readback pixels: runtime not initialized');
+      return;
+    }
+
+    const texture = this.runtime.getCurrentTexture();
+    if (!texture) {
+      console.warn('[Debug] Cannot readback pixels: no texture available');
+      return;
+    }
+
+    const dims = this.runtime.getDimensions();
+
+    console.log('[Debug] Canvas dimensions:', {
+      clientWidth: this.deckCanvas.clientWidth,
+      clientHeight: this.deckCanvas.clientHeight,
+      canvasWidth: this.deckCanvas.width,
+      canvasHeight: this.deckCanvas.height,
+      physicalWidth: dims.physicalWidth,
+      physicalHeight: dims.physicalHeight,
+      dpr: dims.dpr,
+    });
+
+    console.log('[Debug] Triggering pixel readback...');
+    console.log('[Debug] Press "d" key anytime to run this diagnostic again');
+
+    await debugCanvasPixels(
+      this.runtime.getDevice(),
+      texture,
+      dims.physicalWidth,
+      dims.physicalHeight
+    );
   }
 
   private togglePlay(): void {
@@ -642,6 +685,14 @@ class DJVisualizationApp {
       if (fpsEl) {
         fpsEl.textContent = this.currentFPS.toString();
       }
+    }
+
+    // Auto-debug: Run pixel readback after 60 frames (1 second at 60fps) to verify rendering
+    if (!this.hasRunFirstFrameDebug && this.frameCount === 60) {
+      this.hasRunFirstFrameDebug = true;
+      console.log('[Debug] Running automatic first-frame pixel analysis...');
+      console.log('[Debug] Press "D" key anytime to run diagnostics again');
+      void this.debugReadbackPixels();
     }
 
     // Update deck state if playing

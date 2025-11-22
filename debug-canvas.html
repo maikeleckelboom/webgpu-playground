@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Canvas Debug Helper</title>
+  <style>
+    body { margin: 20px; font-family: monospace; }
+    .debug-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+    button { padding: 10px; margin: 5px; }
+  </style>
+</head>
+<body>
+  <h1>Canvas Rendering Debug Helper</h1>
+
+  <div class="debug-section">
+    <h2>Copy this into browser console:</h2>
+    <pre id="debug-script">
+// ============================================
+// Canvas Debug Script
+// ============================================
+
+// 1. Check canvas exists and dimensions
+const canvas = document.getElementById('deck-a');
+console.log('Canvas element:', canvas);
+console.log('Canvas size:', {
+  clientWidth: canvas?.clientWidth,
+  clientHeight: canvas?.clientHeight,
+  width: canvas?.width,
+  height: canvas?.height,
+  style: canvas?.style.cssText
+});
+
+// 2. Check canvas visibility
+const rect = canvas?.getBoundingClientRect();
+console.log('Canvas position:', rect);
+console.log('Is visible:', rect && rect.width > 0 && rect.height > 0);
+
+// 3. Try to read pixel data from canvas
+if (canvas) {
+  const ctx = canvas.getContext('webgpu');
+  console.log('WebGPU context:', ctx);
+
+  // Check if canvas has any non-black pixels
+  // (This requires reading back from GPU which WebGPU doesn't support directly,
+  //  but we can check if context is configured)
+  console.log('Context configured:', ctx !== null);
+}
+
+// 4. Check WebGPU device state
+if (window.app && window.app.runtime) {
+  const device = window.app.runtime.getDevice();
+  console.log('GPU Device:', device);
+  console.log('Device lost:', device.lost);
+}
+
+// 5. Force a manual render test
+console.log('Check the Elements tab - look for canvas element and inspect its computed style');
+    </pre>
+  </div>
+
+  <div class="debug-section">
+    <h2>Common Issues & Fixes:</h2>
+    <ul>
+      <li><strong>Canvas is 0x0:</strong> CSS issue - check parent container has dimensions</li>
+      <li><strong>Canvas exists but black:</strong> WebGPU commands not submitting or shader not running</li>
+      <li><strong>No console logs:</strong> Component not initializing or update/encode not being called</li>
+      <li><strong>Shader should show at minimum:</strong> Dark blue/purple gradient + white center line</li>
+    </ul>
+  </div>
+
+  <div class="debug-section">
+    <h2>Quick Test - Enable Shader Debug Mode:</h2>
+    <p>Edit <code>src/shaders/waveform.wgsl</code> line 71:</p>
+    <pre>
+// Change from:
+const DEBUG_MODE: u32 = 0u;
+
+// To one of:
+const DEBUG_MODE: u32 = 1u;  // Show amplitude as grayscale
+const DEBUG_MODE: u32 = 2u;  // Show band energies as RGB
+const DEBUG_MODE: u32 = 3u;  // Show texture sampling as gradient
+    </pre>
+    <p>This will help verify if the shader is running at all.</p>
+  </div>
+
+  <div class="debug-section">
+    <h2>Check Render Loop:</h2>
+    <p>Add this to console to verify frames are rendering:</p>
+    <pre>
+let frameCount = 0;
+const originalRAF = window.requestAnimationFrame;
+window.requestAnimationFrame = function(callback) {
+  return originalRAF.call(window, function(...args) {
+    frameCount++;
+    if (frameCount % 60 === 0) {
+      console.log(`Frame ${frameCount} - render loop is active`);
+    }
+    return callback(...args);
+  });
+};
+    </pre>
+  </div>
+</body>
+</html>
