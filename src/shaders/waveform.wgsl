@@ -68,7 +68,8 @@ struct BandColors {
 // 1u = Show raw amplitude as grayscale
 // 2u = Show band energies as RGB (low=R, mid=G, high=B)
 // 3u = Show LOD texture coordinate as color gradient
-const DEBUG_MODE: u32 = 0u;
+// 4u = Show bright colors to prove shader is running
+const DEBUG_MODE: u32 = 4u;
 
 @group(0) @binding(0) var<uniform> shared: SharedUniforms;
 @group(1) @binding(0) var<uniform> waveform: WaveformUniforms;
@@ -298,6 +299,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
       if (!hasPlayhead) {
         color = vec3<f32>(clampedCoord, fract(lodCoord * 10.0), 0.5);
       }
+      return vec4<f32>(color, 1.0);
+    } else if (DEBUG_MODE == 4u) {
+      // Mode 4: Bright test pattern to prove rendering works
+      // Show bright horizontal stripes
+      let stripeY = floor(normalizedY * 10.0);
+      if (fract(stripeY / 2.0) < 0.5) {
+        color = vec3<f32>(1.0, 0.0, 0.0); // Red stripes
+      } else {
+        color = vec3<f32>(0.0, 1.0, 1.0); // Cyan stripes
+      }
+      // Add vertical position indicator
+      color = mix(color, vec3<f32>(1.0, 1.0, 0.0), smoothstep(0.49, 0.51, normalizedY));
       return vec4<f32>(color, 1.0);
     }
 
