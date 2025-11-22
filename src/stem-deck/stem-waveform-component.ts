@@ -207,25 +207,38 @@ export class StemWaveformComponent {
     // Create uniform data array (for writing)
     this.uniformData = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
 
-    // Create bind group layout (matches shader @group(0))
+    // Create complete bind group layout (includes uniforms + textures)
     const bindGroupLayout = device.createBindGroupLayout({
       label: 'StemWaveform Bind Group Layout',
       entries: [
         // Binding 0: Uniforms
-        {
-          binding: 0,
-          visibility: GPUShaderStage.FRAGMENT,
-          buffer: { type: 'uniform' }
-        },
-        // Bindings 1-17: Textures (defined in gpuResources.bindGroupLayout)
-        // We'll use gpuResources.bindGroupLayout directly
+        { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+
+        // Bindings 1-17: Textures and sampler
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 7, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 8, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 9, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 10, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 11, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 12, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 13, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 14, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 15, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 16, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 17, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }
       ]
     });
 
     // Create pipeline layout
     const pipelineLayout = device.createPipelineLayout({
       label: 'StemWaveform Pipeline Layout',
-      bindGroupLayouts: [gpuResources.bindGroupLayout]
+      bindGroupLayouts: [bindGroupLayout]
     });
 
     // Create render pipeline
@@ -246,17 +259,8 @@ export class StemWaveformComponent {
       }
     });
 
-    // Create bind group (combine uniform buffer with texture bind group)
-    // Actually, the shader expects a single bind group with uniforms at binding 0
-    // and textures at bindings 1-17. The gpuResources.bindGroup has bindings 1-17.
-    // We need to create a new bind group that includes binding 0 (uniforms).
-
-    // Get texture bindings from gpuResources.bindGroup
-    // This is tricky - we can't extract entries from an existing bind group.
-    // Instead, we need to recreate the bind group with our uniform buffer.
-
-    // Let's create a new bind group that matches the shader's expectations
-    this.bindGroup = this.createCompleteBindGroup();
+    // Create complete bind group (uniforms + textures)
+    this.bindGroup = this.createCompleteBindGroup(bindGroupLayout);
 
     // Setup interaction handlers
     this.setupInteractionHandlers(canvas);
@@ -265,23 +269,7 @@ export class StemWaveformComponent {
   /**
    * Create bind group with uniforms and textures
    */
-  private createCompleteBindGroup(): GPUBindGroup {
-    // We need to get the individual texture views from gpuResources
-    // This is a problem - gpuResources only exposes bindGroup, not individual textures
-    // We need to either:
-    // 1. Modify gpuResources to expose textures
-    // 2. Modify the shader to use two bind groups
-    // 3. Recreate the texture bind group entries here
-
-    // For now, let's use approach #2: modify shader to use @group(0) for uniforms
-    // and @group(1) for textures. This requires changing the shader.
-
-    // Actually, looking at the shader again, it uses @group(0) for everything.
-    // So we need approach #1 or #3.
-
-    // Let's go with approach #3 for now - recreate bind group entries here.
-    // This requires access to the individual LOD textures from gpuResources.
-
+  private createCompleteBindGroup(layout: GPUBindGroupLayout): GPUBindGroup {
     const entries: GPUBindGroupEntry[] = [];
 
     // Binding 0: Uniform buffer
@@ -340,7 +328,7 @@ export class StemWaveformComponent {
 
     return this.device.createBindGroup({
       label: 'StemWaveform Bind Group',
-      layout: this.gpuResources.bindGroupLayout,
+      layout,
       entries
     });
   }
