@@ -151,8 +151,15 @@ class DJVisualizationApp {
       // Show main UI first (must be visible for resize to work correctly)
       this.showMainUI();
 
-      // Handle resize AFTER showing UI (canvas must be visible to get correct dimensions)
-      this.handleResize();
+      // Wait for browser to paint the UI before measuring canvas dimensions
+      // This ensures clientWidth/clientHeight are valid (not 0)
+      await new Promise<void>(resolve => {
+        requestAnimationFrame(() => {
+          this.handleResize();
+          resolve();
+        });
+      });
+
       window.addEventListener('resize', () => {
         this.handleResize();
       });
