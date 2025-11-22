@@ -134,24 +134,29 @@ fn sampleToLODCoord(samplePos: f32) -> f32 {
 
 // Sample amplitude from texture (returns min, max)
 fn sampleAmplitude(lodCoord: f32) -> vec2<f32> {
-  if (lodCoord < 0.0 || lodCoord > 1.0) {
-    return vec2<f32>(0.0, 0.0);
-  }
+  // Clamp coordinate to valid range to maintain uniform control flow
+  let clampedCoord = clamp(lodCoord, 0.0, 1.0);
   // Texture is 1D (height=1), so Y coordinate should be 0.5 (center of single row)
-  let texCoord = vec2<f32>(lodCoord, 0.5);
+  let texCoord = vec2<f32>(clampedCoord, 0.5);
   let sample = textureSample(amplitudeTex, texSampler, texCoord);
-  return vec2<f32>(sample.r, sample.g); // min, max
+
+  // Create a mask for out-of-bounds coordinates
+  let inBounds = f32(lodCoord >= 0.0 && lodCoord <= 1.0);
+  return vec2<f32>(sample.r, sample.g) * inBounds; // min, max (zeroed if out of bounds)
 }
 
 // Sample band energies (low, mid, high)
 fn sampleBands(lodCoord: f32) -> vec3<f32> {
-  if (lodCoord < 0.0 || lodCoord > 1.0) {
-    return vec3<f32>(0.33, 0.33, 0.34); // Return balanced bands for out-of-bounds
-  }
+  // Clamp coordinate to valid range to maintain uniform control flow
+  let clampedCoord = clamp(lodCoord, 0.0, 1.0);
   // Texture is 1D (height=1), so Y coordinate should be 0.5 (center of single row)
-  let texCoord = vec2<f32>(lodCoord, 0.5);
+  let texCoord = vec2<f32>(clampedCoord, 0.5);
   let sample = textureSample(bandsTex, texSampler, texCoord);
-  return vec3<f32>(sample.r, sample.g, sample.b);
+
+  // Create a mask for out-of-bounds coordinates
+  let inBounds = f32(lodCoord >= 0.0 && lodCoord <= 1.0);
+  let defaultBands = vec3<f32>(0.33, 0.33, 0.34); // Balanced bands for out-of-bounds
+  return mix(defaultBands, vec3<f32>(sample.r, sample.g, sample.b), inBounds);
 }
 
 // Map band energies to color
