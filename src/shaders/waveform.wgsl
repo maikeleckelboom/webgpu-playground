@@ -70,7 +70,7 @@ struct BandColors {
 // 3u = Show LOD texture coordinate as color gradient
 const DEBUG_MODE: u32 = 0u;
 
-@group(0) @binding(0) var<uniform> shared: SharedUniforms;
+@group(0) @binding(0) var<uniform> globalUniforms: SharedUniforms;
 @group(1) @binding(0) var<uniform> waveform: WaveformUniforms;
 @group(1) @binding(1) var amplitudeTex: texture_2d<f32>;
 @group(1) @binding(2) var bandsTex: texture_2d<f32>;
