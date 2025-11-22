@@ -1,16 +1,27 @@
 import { defineConfig } from 'vitest/config';
+import { playwright } from '@vitest/browser-playwright';
 
 export default defineConfig({
   test: {
     // Only pick browser tests
     include: ['tests/browser/**/*.browser.test.ts'],
-    environment: 'node',
     browser: {
       enabled: true,
-      headless: true,
-      name: 'chromium',
-      provider: 'playwright',
-      viewport: { width: 1280, height: 720 },
+      // WebGPU requires headed browser or GPU-enabled CI environment
+      // Set to false for local development with display
+      headless: false,
+      provider: playwright({
+        launch: {
+          // Attempt to enable WebGPU (may not work in all headless environments)
+          args: [
+            '--enable-unsafe-webgpu',
+            '--enable-features=Vulkan,UseSkiaRenderer',
+            '--use-gl=angle',
+            '--use-angle=swiftshader',
+          ],
+        },
+      }),
+      instances: [{ browser: 'chromium' }],
     },
   },
   resolve: {

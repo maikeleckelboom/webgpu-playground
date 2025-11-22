@@ -2,6 +2,26 @@
 
 Comprehensive testing infrastructure for the WebGPU waveform renderer, organized in layers.
 
+## ⚠️ Important: Browser Test Requirements
+
+**WebGPU browser tests require a real GPU environment:**
+- ❌ **Headless Chromium** typically doesn't support WebGPU (`navigator.gpu` is null)
+- ✅ **Headed browser** works on local machines with display (`headless: false`)
+- ✅ **GPU-enabled CI** runners (GitHub Actions with GPU)
+- ✅ **Node tests** (logic + GPU plumbing) run everywhere without GPU
+
+**Current test status:**
+- ✅ **38 node tests passing** (logic + GPU resource plumbing with mocks)
+- ⏸️ **Browser tests pending** - requires local environment with GPU + display
+- 📝 **Test structure complete** - harness and tests are ready to run
+
+**To run browser tests locally:**
+```bash
+# Set headless: false in vitest.browser.config.ts (already configured)
+npm run test:behavior     # Opens Chromium window
+npm run test:visual       # Opens Chromium window + takes screenshots
+```
+
 ## Test Architecture
 
 ### 1. Pure Logic Tests (Node Environment)
