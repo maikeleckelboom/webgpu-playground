@@ -89,17 +89,17 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
         {
           binding: 1,
           visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
+          texture: { sampleType: 'unfilterable-float' },
         },
         {
           binding: 2,
           visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
+          texture: { sampleType: 'unfilterable-float' },
         },
         {
           binding: 3,
           visibility: GPUShaderStage.FRAGMENT,
-          sampler: { type: 'filtering' },
+          sampler: { type: 'non-filtering' },
         },
       ],
     });
@@ -150,11 +150,11 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
 
-    // Create sampler
+    // Create sampler (nearest filtering for unfilterable-float textures)
     const sampler = device.createSampler({
       label: 'Waveform Sampler',
-      magFilter: 'linear',
-      minFilter: 'linear',
+      magFilter: 'nearest',
+      minFilter: 'nearest',
       addressModeU: 'clamp-to-edge',
       addressModeV: 'clamp-to-edge',
     });
@@ -263,6 +263,35 @@ export class DeckWaveformComponent implements VisualComponent, DeckWaveformContr
     // Validate LOD data
     if (!lod || lod.lengthInPixels === 0) {
       console.error('[DeckWaveformComponent] Invalid LOD data', { lodIndex, lod });
+      return;
+    }
+
+    // Check GPU texture size limits
+    const maxTextureSize = this.device.limits.maxTextureDimension2D;
+    if (lod.lengthInPixels > maxTextureSize) {
+      console.error('[DeckWaveformComponent] LOD texture too large for GPU', {
+        lodLengthInPixels: lod.lengthInPixels,
+        maxTextureSize,
+        lodIndex,
+      });
+      // Find a smaller LOD that fits within GPU limits
+      let fallbackLodIndex = lodIndex + 1;
+      while (fallbackLodIndex < pyramid.lods.length) {
+        const fallbackLod = pyramid.lods[fallbackLodIndex];
+        if (fallbackLod && fallbackLod.lengthInPixels <= maxTextureSize) {
+          console.warn('[DeckWaveformComponent] Using fallback LOD', {
+            originalIndex: lodIndex,
+            fallbackIndex: fallbackLodIndex,
+            fallbackLength: fallbackLod.lengthInPixels,
+          });
+          // Recursively call with corrected index
+          this.currentLODIndex = fallbackLodIndex;
+          this.uploadWaveformData(pyramid);
+          return;
+        }
+        fallbackLodIndex++;
+      }
+      console.error('[DeckWaveformComponent] No LOD fits within GPU texture limits!');
       return;
     }
 
