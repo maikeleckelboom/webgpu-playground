@@ -144,18 +144,18 @@ class DJVisualizationApp {
       this.metersComponent = new ChannelMetersComponent(2);
       await this.metersComponent.initialize(metersRuntime.getDevice(), metersRuntime.getContext());
 
+      // Show main UI first (so canvas has proper dimensions)
+      this.showMainUI();
+
       // Set up event handlers
       this.setupEventHandlers();
       this.setupKeyboardShortcuts();
 
-      // Handle resize
+      // Handle resize AFTER showing UI
       this.handleResize();
       window.addEventListener('resize', () => {
         this.handleResize();
       });
-
-      // Show main UI
-      this.showMainUI();
 
       // Start render loop
       this.lastTime = performance.now() / 1000;
