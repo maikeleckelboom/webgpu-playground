@@ -18,6 +18,16 @@
 export type StemType = 'drums' | 'bass' | 'vocals' | 'other' | 'master';
 
 /**
+ * Stem identifier (alias for StemType)
+ */
+export type StemId = StemType;
+
+/**
+ * Band identifier (numeric index into frequency bands)
+ */
+export type BandId = number;
+
+/**
  * Single LOD level waveform data
  *
  * This is the fundamental unit - GPU renderer needs this format.
