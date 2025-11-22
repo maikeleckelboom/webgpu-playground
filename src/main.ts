@@ -62,7 +62,7 @@ class DJVisualizationApp {
 
     // Create test deck state
     this.deckState = createTestDeckState({
-      durationSeconds: 240, // 4 minute track
+      durationSeconds: 10, // Short test track to fit GPU texture limits
       sampleRate: 44100,
       bpm: 128,
       key: 'Am',
