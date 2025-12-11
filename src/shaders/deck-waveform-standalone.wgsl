@@ -1,15 +1,16 @@
+// File: src/shaders/deck-waveform-standalone.wgsl
+
 // =============================================================================
-// Deck Waveform Shader - Centered Playhead with Multi-Band Coloring
-// Optimized for Serato DJ Pro-style visual quality
-// Version 2: Improved color separation and discrete column rendering
+// Deck Waveform Shader - "Serato Pro" RGB Spectrum Style
+// Target: Additive RGB color mixing (Red=Low, Green=Mid, Blue=High)
+// Result: Cyan (Mid+High), Magenta (Low+High), White (All), Yellow (Low+Mid)
 // =============================================================================
 
-// Uniform buffer matching the TypeScript WaveUniformsData structure
 struct WaveUniforms {
     viewWidth: f32,
     viewHeight: f32,
-    playheadSamplesHigh: f32,  // High-order component (floor div by 2^16)
-    playheadSamplesLow: f32,   // Low-order component (remainder)
+    playheadSamplesHigh: f32,
+    playheadSamplesLow: f32,
     sampleRate: f32,
     rate: f32,
     zoomLevel: f32,
@@ -20,11 +21,10 @@ struct WaveUniforms {
     waveformCenterY: f32,
     waveformMaxHeight: f32,
     time: f32,
-    // LOD blending parameters
-    lodBlendFactor: f32,           // blend factor between primary and secondary LOD (0..1)
-    secondarySamplesPerPixel: f32, // secondary LOD's samples per pixel
-    secondaryLodLengthInPixels: f32, // secondary LOD's length
-    beatPhaseOffset: f32,          // beat grid phase offset (0..1)
+    lodBlendFactor: f32,
+    secondarySamplesPerPixel: f32,
+    secondaryLodLengthInPixels: f32,
+    beatPhaseOffset: f32,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: WaveUniforms;
@@ -34,381 +34,138 @@ struct WaveUniforms {
 @group(0) @binding(4) var secondaryBandsTex: texture_2d<f32>;
 @group(0) @binding(5) var texSampler: sampler;
 
-// Vertex output / Fragment input
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
 }
 
-// =============================================================================
-// Vertex Shader - Fullscreen Triangle
-// =============================================================================
-
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
     var out: VertexOutput;
-
-    // Generate fullscreen triangle using vertex index
+    // Generate fullscreen triangle
     let x = f32((vertexIndex << 1u) & 2u);
     let y = f32(vertexIndex & 2u);
-
     out.position = vec4<f32>(x * 2.0 - 1.0, y * 2.0 - 1.0, 0.0, 1.0);
-    out.uv = vec2<f32>(x, 1.0 - y); // Flip Y for correct orientation
-
+    out.uv = vec2<f32>(x, 1.0 - y);
     return out;
 }
 
 // =============================================================================
-// Utility Functions
+// Helper Functions
 // =============================================================================
 
-// Reconstruct high-precision sample position from split floats
 fn reconstruct_playhead() -> f32 {
-    let splitFactor = 65536.0; // 2^16
-    return uniforms.playheadSamplesHigh * splitFactor + uniforms.playheadSamplesLow;
+    return uniforms.playheadSamplesHigh * 65536.0 + uniforms.playheadSamplesLow;
 }
 
-// Sample amplitude and bands from a specific LOD
-fn sample_lod_primary(samplePosition: f32) -> vec4<f32> {
-    let pixelIndexFloat = samplePosition / uniforms.samplesPerPixel;
-    let texCoordX = clamp(pixelIndexFloat / uniforms.lodLengthInPixels, 0.0, 1.0);
+// Sample Data with LOD Blending
+// Returns: vec4(amplitude, low, mid, high)
+fn sample_lod_data(samplePosition: f32) -> vec4<f32> {
+    // 1. Primary LOD Sampling
+    let px1 = samplePosition / uniforms.samplesPerPixel;
+    let tx1 = clamp(px1 / uniforms.lodLengthInPixels, 0.0, 1.0);
+    // Amplitude is usually stored in R or G. We use G (Max) for the envelope.
+    let amp1 = textureSample(amplitudeTex, texSampler, vec2<f32>(tx1, 0.5)).g;
+    // Bands are stored in RGB channels of the bands texture
+    let bands1 = textureSample(bandsTex, texSampler, vec2<f32>(tx1, 0.5));
 
-    let amplitude = textureSample(amplitudeTex, texSampler, vec2<f32>(texCoordX, 0.5)).r;
+    // 2. Secondary LOD Sampling (for smooth zooming)
+    let px2 = samplePosition / uniforms.secondarySamplesPerPixel;
+    let tx2 = clamp(px2 / uniforms.secondaryLodLengthInPixels, 0.0, 1.0);
+    let amp2 = textureSample(secondaryAmplitudeTex, texSampler, vec2<f32>(tx2, 0.5)).g;
+    let bands2 = textureSample(secondaryBandsTex, texSampler, vec2<f32>(tx2, 0.5));
 
-    var bands = vec3<f32>(0.0);
-    if (uniforms.bandCount >= 3u) {
-        let bandTexHeight = f32(uniforms.bandCount);
-        let lowY = 0.5 / bandTexHeight;
-        let midY = 1.5 / bandTexHeight;
-        let highY = 2.5 / bandTexHeight;
-        bands.x = textureSample(bandsTex, texSampler, vec2<f32>(texCoordX, lowY)).r;
-        bands.y = textureSample(bandsTex, texSampler, vec2<f32>(texCoordX, midY)).r;
-        bands.z = textureSample(bandsTex, texSampler, vec2<f32>(texCoordX, highY)).r;
-    } else {
-        bands = vec3<f32>(amplitude);
-    }
+    // 3. Blend LODs
+    let finalAmp = mix(amp1, amp2, uniforms.lodBlendFactor);
+    let finalBands = mix(bands1, bands2, uniforms.lodBlendFactor);
 
-    return vec4<f32>(bands, amplitude);
-}
-
-fn sample_lod_secondary(samplePosition: f32) -> vec4<f32> {
-    let pixelIndexFloat = samplePosition / uniforms.secondarySamplesPerPixel;
-    let texCoordX = clamp(pixelIndexFloat / uniforms.secondaryLodLengthInPixels, 0.0, 1.0);
-
-    let amplitude = textureSample(secondaryAmplitudeTex, texSampler, vec2<f32>(texCoordX, 0.5)).r;
-
-    var bands = vec3<f32>(0.0);
-    if (uniforms.bandCount >= 3u) {
-        let bandTexHeight = f32(uniforms.bandCount);
-        let lowY = 0.5 / bandTexHeight;
-        let midY = 1.5 / bandTexHeight;
-        let highY = 2.5 / bandTexHeight;
-        bands.x = textureSample(secondaryBandsTex, texSampler, vec2<f32>(texCoordX, lowY)).r;
-        bands.y = textureSample(secondaryBandsTex, texSampler, vec2<f32>(texCoordX, midY)).r;
-        bands.z = textureSample(secondaryBandsTex, texSampler, vec2<f32>(texCoordX, highY)).r;
-    } else {
-        bands = vec3<f32>(amplitude);
-    }
-
-    return vec4<f32>(bands, amplitude);
-}
-
-// Blend between two LODs using the blend factor
-fn sample_blended_lod(samplePosition: f32) -> vec4<f32> {
-    let primaryData = sample_lod_primary(samplePosition);
-
-    // If blend factor is 0, skip secondary sampling
-    if (uniforms.lodBlendFactor < 0.001) {
-        return primaryData;
-    }
-
-    let secondaryData = sample_lod_secondary(samplePosition);
-
-    // Blend the actual texture samples, not just metadata
-    return mix(primaryData, secondaryData, uniforms.lodBlendFactor);
+    return vec4<f32>(finalAmp, finalBands.r, finalBands.g, finalBands.b);
 }
 
 // =============================================================================
-// Color Mapping Functions - Serato-Style Spectral Coloring (Improved)
-// =============================================================================
-
-// Map band energies to color with dominant frequency emphasis
-fn color_from_bands_v2(bands: vec3<f32>) -> vec3<f32> {
-    // Serato-inspired frequency band colors (more saturated)
-    let lowColor = vec3<f32>(0.98, 0.22, 0.12);   // Pure red/orange for bass
-    let midColor = vec3<f32>(0.12, 0.92, 0.32);   // Vibrant green for mids
-    let highColor = vec3<f32>(0.15, 0.58, 0.98);  // Bright blue for highs
-
-    // Find the dominant band
-    let maxBand = max(max(bands.x, bands.y), bands.z);
-    let minBand = min(min(bands.x, bands.y), bands.z);
-
-    // Compute dominance ratio (how much one band stands out)
-    let dominanceRatio = (maxBand - minBand) / (maxBand + 1e-4);
-
-    // Apply stronger non-linear emphasis
-    let emphasis = 3.0;
-    let b = vec3<f32>(
-        pow(bands.x, emphasis),
-        pow(bands.y, emphasis),
-        pow(bands.z, emphasis)
-    );
-
-    // Normalize
-    let sum = max(b.x + b.y + b.z, 1e-4);
-    let weights = b / sum;
-
-    // Weighted color blend
-    var color = lowColor * weights.x + midColor * weights.y + highColor * weights.z;
-
-    // Boost saturation based on dominance (more dominant = more saturated)
-    let luminance = dot(color, vec3<f32>(0.299, 0.587, 0.114));
-    let saturationBoost = 1.2 + dominanceRatio * 0.8; // Range: 1.2 to 2.0
-    color = mix(vec3<f32>(luminance), color, saturationBoost);
-
-    // Ensure minimum saturation by clamping away from gray
-    let gray = vec3<f32>(luminance);
-    let saturationFloor = 0.6;
-    let currentSaturation = length(color - gray) / (luminance + 0.1);
-    if (currentSaturation < saturationFloor && maxBand > 0.1) {
-        // Push color away from gray
-        let toColor = normalize(color - gray + vec3<f32>(0.001));
-        color = gray + toColor * saturationFloor * (luminance + 0.1);
-    }
-
-    return clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
-}
-
-// Compute brightness with perceptual gamma curve
-fn compute_brightness(amplitude: f32) -> f32 {
-    let gamma = 0.55;
-    let brightness = pow(clamp(amplitude, 0.0, 1.0), gamma);
-
-    // Ensure minimum visibility even for quiet sections
-    let minBrightness = 0.12;
-    return mix(minBrightness, 1.0, brightness);
-}
-
-// =============================================================================
-// Fragment Shader - Centered Playhead Waveform Rendering (Improved)
+// Fragment Shader - Additive RGB Spectrum
 // =============================================================================
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // 1. Setup Coordinates
     let uv = in.uv;
-
-    // Background color (dark blue-gray for contrast)
-    let backgroundColor = vec3<f32>(0.04, 0.04, 0.07);
-
-    // ==========================================================================
-    // Centered Playhead Mapping (High Precision)
-    // ==========================================================================
-
     let xFromCenter = uv.x - 0.5;
     let pixelsFromCenter = xFromCenter * uniforms.viewWidth;
     let sampleOffset = pixelsFromCenter * uniforms.samplesPerPixel;
-
     let playheadSamples = reconstruct_playhead();
     let samplePosition = playheadSamples + sampleOffset;
 
-    // Convert sample position to LOD pixel index (float for sub-pixel precision)
-    let pixelIndexFloat = samplePosition / uniforms.samplesPerPixel;
-    let texCoordX = pixelIndexFloat / uniforms.lodLengthInPixels;
+    // 2. Sample Audio Data
+    // x = Amplitude (envelope height)
+    // y = Low (Red), z = Mid (Green), w = High (Blue)
+    let data = sample_lod_data(samplePosition);
+    let amplitude = data.x;
+    let bands = vec3<f32>(data.y, data.z, data.w);
 
-    // ==========================================================================
-    // Boundary Handling
-    // ==========================================================================
+    // 3. Geometry (Symmetric)
+    // Calculate distance from vertical center (0.0 to 1.0)
+    let distY = abs(uv.y - 0.5) * 2.0;
 
-    let normalizedPosition = samplePosition / uniforms.totalSamples;
-    let isBeforeStart = samplePosition < 0.0;
-    let isAfterEnd = normalizedPosition > 1.0;
+    // Define the shape height based on amplitude
+    // We scale it by 0.9 to leave a little headroom
+    let height = amplitude * 0.9;
 
-    if (isBeforeStart || isAfterEnd) {
-        var fadeDistance = 0.0;
-        if (isBeforeStart) {
-            fadeDistance = abs(samplePosition) / (uniforms.viewWidth * uniforms.samplesPerPixel * 0.5);
-        } else {
-            fadeDistance = (normalizedPosition - 1.0) * uniforms.lodLengthInPixels / (uniforms.viewWidth * 0.5);
-        }
-        let fade = exp(-fadeDistance * 3.0);
-        let fadedBg = backgroundColor * (0.3 + 0.7 * fade);
-        return vec4<f32>(fadedBg, 1.0);
+    // 4. Sharp Masking (The Digital Look)
+    // Unlike the "Gold" shader which used soft gradients, Serato uses sharp edges.
+    // We use fwidth for minimal anti-aliasing (1-2 pixels) without looking blurry.
+    let edge_width = fwidth(distY);
+    let mask = 1.0 - smoothstep(height - edge_width, height, distY);
+
+    // Optimization: Discard pixels outside the waveform
+    if (mask <= 0.001) {
+        // Return black background immediately
+        return vec4<f32>(0.05, 0.05, 0.05, 1.0);
     }
 
-    let clampedTexCoordX = clamp(texCoordX, 0.0, 1.0);
+    // 5. RGB Additive Color Logic
+    // Map bands directly to RGB.
+    // This naturally creates:
+    // - Low + Mid = Yellow
+    // - Low + High = Magenta/Pink
+    // - Mid + High = Cyan/Teal
 
-    // ==========================================================================
-    // Discrete Column Rendering (Serato-Style Thin Bars)
-    // ==========================================================================
+    // We boost the values slightly (1.5x) to make colors vibrant against black
+    let low  = bands.x * 1.5;
+    let mid  = bands.y * 1.2;
+    let high = bands.z * 1.5;
 
-    // Calculate the width of one waveform column in screen pixels
-    let pixelsPerColumn = uniforms.viewWidth / (uniforms.lodLengthInPixels * uniforms.zoomLevel * 0.1);
+    var color = vec3<f32>(low, mid, high);
 
-    // Get the fractional position within the current waveform column
-    let columnFraction = fract(pixelIndexFloat);
+    // 6. White "Hot Core" Logic
+    // In Spectrum mode, high energy signals (transients) turn white.
+    // We calculate total energy to determine "whiteness".
+    let total_energy = low + mid + high;
 
-    // Render thin vertical bars instead of continuous envelope
-    // Column width scales with zoom: thinner at higher zoom (more detail)
-    let columnWidth = clamp(0.4 + uniforms.zoomLevel * 0.1, 0.4, 0.85);
+    // If energy exceeds threshold, blend towards white
+    let white_threshold = 1.8;
+    let core_intensity = smoothstep(white_threshold, 3.0, total_energy);
 
-    // Create column mask: 1.0 in center of column, 0.0 at edges
-    let distFromColumnCenter = abs(columnFraction - 0.5);
-    let halfWidth = columnWidth * 0.5;
+    color = mix(color, vec3<f32>(1.0, 1.0, 1.0), core_intensity);
 
-    // Smooth column edges for anti-aliasing
-    let columnEdgeWidth = 0.05;
-    let columnMask = smoothstep(halfWidth + columnEdgeWidth, halfWidth - columnEdgeWidth, distFromColumnCenter);
+    // 7. Vertical Density Adjustment
+    // Serato waveforms are often slightly denser/brighter in the exact center line
+    // We add a subtle boost at uv.y = 0.5
+    let center_boost = 1.0 - distY;
+    color *= (0.85 + 0.15 * center_boost);
 
-    // Inter-column gap darkening (subtle separation between columns)
-    let gapDarkening = mix(0.7, 1.0, columnMask);
+    // 8. Gamma / Contrast Boost
+    // Gives it that "screen" look (neon pop)
+    color = pow(color, vec3<f32>(1.2));
 
-    // ==========================================================================
-    // Sample Waveform Data (with LOD blending for smooth transitions)
-    // ==========================================================================
+    // 9. Playhead (Stark White Line)
+    let playheadDist = abs(uv.x - 0.5);
+    // 1 pixel width playhead
+    let playheadWidth = 1.0 / uniforms.viewWidth;
 
-    // Use blended LOD sampling for smooth transitions between detail levels
-    let blendedData = sample_blended_lod(samplePosition);
-    var bands = vec3<f32>(blendedData.x, blendedData.y, blendedData.z);
-    let amplitude = clamp(blendedData.w, 0.0, 1.0);
+    if (playheadDist < playheadWidth) {
+        return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+    }
 
-    bands = clamp(bands, vec3<f32>(0.0), vec3<f32>(1.0));
-
-    // ==========================================================================
-    // Waveform Geometry (Frequency-Layered 3D Depth Effect)
-    // ==========================================================================
-
-    let centerY = uniforms.waveformCenterY;
-    let maxHeight = uniforms.waveformMaxHeight;
-    let dy = abs(uv.y - centerY);
-
-    // Compute separate heights for each frequency band (layered visualization)
-    // Low frequencies form the base (largest), highs are on top (smallest)
-    let lowHeight = bands.x * amplitude * maxHeight * 1.0;
-    let midHeight = bands.y * amplitude * maxHeight * 0.85;
-    let highHeight = bands.z * amplitude * maxHeight * 0.7;
-
-    // Combined height for overall envelope
-    let columnHeight = amplitude * maxHeight;
-
-    // Anti-aliasing with sub-pixel precision
-    let pixelSize = 1.0 / uniforms.viewHeight;
-    let aaWidth = pixelSize * 1.2;
-
-    // Main envelope edge factor
-    let edgeFactor = smoothstep(columnHeight + aaWidth, columnHeight - aaWidth, dy);
-
-    // Compute layered depth factors for each band
-    let lowLayerFactor = smoothstep(lowHeight + aaWidth, lowHeight - aaWidth, dy);
-    let midLayerFactor = smoothstep(midHeight + aaWidth, midHeight - aaWidth, dy);
-    let highLayerFactor = smoothstep(highHeight + aaWidth, highHeight - aaWidth, dy);
-
-    // Apply column mask to create discrete bars
-    let shapedEdge = edgeFactor * columnMask;
-
-    // ==========================================================================
-    // Color Computation (Layered Depth Effect)
-    // ==========================================================================
-
-    // Define layer colors with depth cues
-    let lowLayerColor = vec3<f32>(0.98, 0.22, 0.12) * 0.8;  // Red/orange, darker (back)
-    let midLayerColor = vec3<f32>(0.12, 0.92, 0.32) * 0.9;  // Green, medium brightness
-    let highLayerColor = vec3<f32>(0.15, 0.58, 0.98) * 1.0; // Blue, brightest (front)
-
-    // Compose layers from back to front (additive-like blending)
-    let brightness = compute_brightness(amplitude);
-
-    // Start with low layer (back)
-    var layeredColor = lowLayerColor * lowLayerFactor * bands.x;
-
-    // Add mid layer
-    layeredColor = mix(layeredColor, midLayerColor, midLayerFactor * bands.y * 0.7);
-
-    // Add high layer on top (most prominent)
-    layeredColor = mix(layeredColor, highLayerColor, highLayerFactor * bands.z * 0.8);
-
-    // Blend with standard color mapping for balance
-    let baseColor = color_from_bands_v2(bands);
-    let combinedColor = mix(baseColor, layeredColor, 0.4); // 40% layered effect, 60% base
-
-    // Apply brightness
-    let brightColor = combinedColor * brightness;
-
-    // Vertical gradient (brighter at center, darker toward top/bottom)
-    let verticalPosition = dy / maxHeight;
-    let verticalGradient = 1.0 - verticalPosition * 0.3;
-
-    // Depth shading: enhance 3D effect by darkening edges of each layer
-    let depthShading = mix(0.85, 1.0, pow(edgeFactor, 0.5));
-
-    // Edge glow effect for high amplitudes
-    let edgeGlow = pow(edgeFactor, 2.0) * pow(amplitude, 2.0) * 0.12;
-
-    // Final waveform color with all effects
-    let waveformColor = brightColor * verticalGradient * gapDarkening * depthShading;
-
-    // Add subtle inner glow
-    let innerGlow = combinedColor * edgeGlow;
-
-    // ==========================================================================
-    // Beat Grid Rendering (with phase offset support)
-    // ==========================================================================
-
-    // Calculate beat grid positions
-    let samplesPerBeat = (uniforms.sampleRate * 60.0) / f32(128u); // Use 128 BPM as default
-    let beatSamplePosition = samplePosition + uniforms.beatPhaseOffset * samplesPerBeat;
-    let beatPhase = fract(beatSamplePosition / samplesPerBeat);
-
-    // Render beat markers as subtle vertical lines
-    let beatLineWidth = 0.5 / uniforms.viewWidth;
-    let beatDistance = abs(beatPhase - 0.5);
-
-    // Stronger line for downbeats (every 4 beats)
-    let barPhase = fract(beatSamplePosition / (samplesPerBeat * 4.0));
-    let barDistance = abs(barPhase - 0.5);
-
-    // Beat marker intensity (subtle)
-    let beatMarkerIntensity = smoothstep(0.02, 0.0, beatDistance) * 0.15;
-    let barMarkerIntensity = smoothstep(0.01, 0.0, barDistance) * 0.25;
-    let gridIntensity = max(beatMarkerIntensity, barMarkerIntensity);
-
-    // Beat grid color (subtle orange/yellow)
-    let beatGridColor = vec3<f32>(1.0, 0.7, 0.3);
-
-    // ==========================================================================
-    // Playhead Rendering
-    // ==========================================================================
-
-    let playheadWidthPixels = 1.2;
-    let playheadWidth = playheadWidthPixels / uniforms.viewWidth;
-    let playheadX = 0.5;
-    let distToPlayhead = abs(uv.x - playheadX);
-
-    // Sharp core with soft glow
-    let playheadCore = smoothstep(playheadWidth, 0.0, distToPlayhead);
-    let playheadGlow = smoothstep(playheadWidth * 3.0, 0.0, distToPlayhead) * 0.25;
-    let playheadIntensity = playheadCore + playheadGlow;
-
-    // Playhead color (bright white)
-    let playheadColor = vec3<f32>(0.96, 0.98, 1.0);
-
-    // ==========================================================================
-    // Final Composition (Clean, no scanlines)
-    // ==========================================================================
-
-    // Mix waveform and background
-    var finalColor = mix(backgroundColor, waveformColor + innerGlow, shapedEdge);
-
-    // Add beat grid overlay (subtle, behind waveform)
-    finalColor = mix(finalColor, beatGridColor, gridIntensity * (1.0 - shapedEdge * 0.5));
-
-    // Overlay playhead on top
-    finalColor = mix(finalColor, playheadColor, playheadIntensity * 0.95);
-
-    // Add subtle playhead shadow for depth (offset to right)
-    let shadowOffset = 1.5 / uniforms.viewWidth;
-    let shadowDist = abs(uv.x - playheadX - shadowOffset);
-    let shadowIntensity = smoothstep(playheadWidth * 1.5, 0.0, shadowDist) * 0.2;
-    finalColor = mix(finalColor, vec3<f32>(0.0), shadowIntensity * (1.0 - playheadIntensity));
-
-    return vec4<f32>(finalColor, 1.0);
+    return vec4<f32>(color, 1.0);
 }
